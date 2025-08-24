@@ -1,0 +1,17 @@
+{
+  "description": "Pick from assembly side and place on quality side",
+  "steps": [
+    {"method": "POST", "path": "/v1/arm/pose", "body": {"name": "home", "speed": 60}},
+    {"method": "POST", "path": "/v1/arm/move", "body": {"mode": "relative", "joints": {"A": -90}, "speed": 50}},
+    {"method": "POST", "path": "/v1/arm/move", "body": {"mode": "relative", "joints": {"D": 30}, "speed": 30}, "comment": "open claw"},
+    {"method": "POST", "path": "/v1/arm/move", "body": {"mode": "relative", "joints": {"B": -20}, "speed": 40}, "comment": "move down"},
+    {"method": "POST", "path": "/v1/arm/move", "body": {"mode": "relative", "joints": {"D": -30}, "speed": 30}, "comment": "close claw"},
+    {"method": "POST", "path": "/v1/arm/move", "body": {"mode": "relative", "joints": {"B": 20}, "speed": 40}, "comment": "move up"},
+    {"method": "POST", "path": "/v1/arm/move", "body": {"mode": "relative", "joints": {"A": 180}, "speed": 50}, "comment": "rotate to quality"},
+    {"method": "POST", "path": "/v1/arm/move", "body": {"mode": "relative", "joints": {"B": -20}, "speed": 40}, "comment": "move down"},
+    {"method": "POST", "path": "/v1/arm/move", "body": {"mode": "relative", "joints": {"D": 30}, "speed": 30}, "comment": "open claw"},
+    {"method": "POST", "path": "/v1/arm/move", "body": {"mode": "relative", "joints": {"B": 20}, "speed": 40}, "comment": "move up"},
+    {"method": "POST", "path": "/v1/arm/move", "body": {"mode": "relative", "joints": {"D": -30}, "speed": 30}, "comment": "close claw"},
+    {"method": "POST", "path": "/v1/arm/pose", "body": {"name": "home", "speed": 60}, "comment": "return home"}
+  ]
+}
