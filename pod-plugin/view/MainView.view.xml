@@ -42,8 +42,8 @@
               icon="sap-icon://map" press=".onPose"/>
           </l:content>
           <l:content>
-            <Button text="Reboot" type="Reject" width="100%"
-              icon="sap-icon://refresh" press=".onReboot"/>
+            <Button text="Stop" type="Reject" width="100%"
+              icon="sap-icon://stop" press=".onStop"/>
           </l:content>
         </l:Grid>
 

@@ -255,7 +255,7 @@ _log: function (msg, obj) {
     onHealth: async function () {
       this._busy(true); this._setStatus("checking health");
       try {
-        var data = await this._fetchJson("/health");
+        var data = await this._fetchJson("/v1/health");
         this._log("Health", data);
         this._setStatus("health ok", "Success");
       } catch (e) {
@@ -266,7 +266,7 @@ _log: function (msg, obj) {
     onInventory: async function () {
       this._busy(true); this._setStatus("getting inventory");
       try {
-        var data = await this._fetchJson("/inventory");
+        var data = await this._fetchJson("/v1/inventory");
         this._log("Inventory", data);
         this._setStatus("inventory ok", "Success");
       } catch (e) {
@@ -274,22 +274,24 @@ _log: function (msg, obj) {
       } finally { this._busy(false); }
     },
 
-    onReboot: async function () {
-      this._busy(true); this._setStatus("sending reboot");
+    onStop: async function () {
+      this._busy(true); this._setStatus("sending stop");
       try {
-        var data = await this._fetchJson("/reboot", { method: "POST" });
-        this._log("Reboot", data);
-        this._setStatus("reboot accepted", "Success");
+        var data = await this._fetchJson("/v1/arm/stop", { method: "POST", body: JSON.stringify({ reason: "user" }) });
+        this._log("Stop", data);
+        this._setStatus("stop accepted", "Success");
       } catch (e) {
-        this._setStatus("reboot error - " + e.message, "Error");
+        this._setStatus("stop error - " + e.message, "Error");
       } finally { this._busy(false); }
     },
 
     onPick: async function () {
       this._busy(true); this._setStatus("sending pick");
       try {
-        // Choose the endpoint you exposed. Example uses query param.
-        var data = await this._fetchJson("/move?command=pick");
+        var data = await this._fetchJson("/v1/arm/pickplace", {
+          method: "POST",
+          body: JSON.stringify({ action: "pick", location: "center" })
+        });
         this._log("Pick", data);
         this._setStatus("pick ok", "Success");
       } catch (e) {
@@ -300,7 +302,10 @@ _log: function (msg, obj) {
     onPlace: async function () {
       this._busy(true); this._setStatus("sending place");
       try {
-        var data = await this._fetchJson("/move?command=place");
+        var data = await this._fetchJson("/v1/arm/pickplace", {
+          method: "POST",
+          body: JSON.stringify({ action: "place", location: "center" })
+        });
         this._log("Place", data);
         this._setStatus("place ok", "Success");
       } catch (e) {
@@ -309,28 +314,10 @@ _log: function (msg, obj) {
     },
 
     onPose: async function () {
-        this._busy(true); this._setStatus("sending pose");
-        try {
-            var payload = this._buildMovePayload("pose"); // reuses your input fields
-            // If you want pose to always be zeros, uncomment next line:
-            // payload.joints = payload.motors = { A:0, B:0, C:0, D:0 };
-            var data = await this._fetchJson("/move", {
-            method: "POST",
-            body: JSON.stringify(payload)
-            });
-            this._log("Pose", data);
-            this._setStatus("pose ok", "Success");
-        } catch (e) {
-            this._setStatus("pose error - " + e.message, "Error");
-        } finally { this._busy(false); }
-    },
-
-
-    onPose: async function () {
       this._busy(true); this._setStatus("sending pose");
       try {
-        var body = { command: "pose", joints: { A: 0, B: 0, C: 0, D: 0 }, speed: 40 };
-        var data = await this._fetchJson("/move", { method: "POST", body: JSON.stringify(body) });
+        var body = { name: "home" };
+        var data = await this._fetchJson("/v1/arm/pose", { method: "POST", body: JSON.stringify(body) });
         this._log("Pose", data);
         this._setStatus("pose ok", "Success");
       } catch (e) {
@@ -341,39 +328,34 @@ _log: function (msg, obj) {
     /* ======================
        Move flow
        ====================== */
-    _buildMovePayload: function (command) {
-    var num = function (id, def) {
+    _buildMovePayload: function () {
+      var num = function (id, def) {
         var c = this.byId(id);
         var v = c ? Number(c.getValue()) : def;
         return isFinite(v) ? v : def;
-    }.bind(this);
+      }.bind(this);
 
-    var joints = {
+      var joints = {
         A: num("degA", 0),
         B: num("degB", 0),
         C: num("degC", 0),
         D: num("degD", 0)
-    };
+      };
 
-    var payload = {
-        command: command || "move",
+      var payload = {
+        mode: "relative",
         joints: joints,
-        // compatibility aliases in case the backend looks for "motors" or "acceleration"
-        motors: joints,
-        speed: num("speed", 180),
-        accel: num("accel", 360),
-        acceleration: num("accel", 360),
-        dryRun: !!(this.byId("dryRun") && this.byId("dryRun").getSelected && this.byId("dryRun").getSelected())
-    };
+        speed: num("speed", 60)
+      };
 
-    return payload;
+      return payload;
     },
 
 
     onPreviewMove: function () {
     var ta = this.byId("movePreview");
     if (!ta) return;
-    var payload = this._buildMovePayload("move");
+    var payload = this._buildMovePayload();
     ta.setValue(JSON.stringify(payload, null, 2));
     this._log("Move preview", payload);
     },
@@ -382,8 +364,8 @@ _log: function (msg, obj) {
     onSendMove: async function () {
     this._busy(true); this._setStatus("sending move");
     try {
-        var payload = this._buildMovePayload("move");
-        var data = await this._fetchJson("/move", { method: "POST", body: JSON.stringify(payload) });
+        var payload = this._buildMovePayload();
+        var data = await this._fetchJson("/v1/arm/move", { method: "POST", body: JSON.stringify(payload) });
         this._log("Move response", data);
         this._setStatus("move ok", "Success");
     } catch (e) {
