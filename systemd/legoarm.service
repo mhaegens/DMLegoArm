@@ -4,12 +4,12 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-User=michiel
-Group=michiel
-WorkingDirectory=/home/michiel/lego-arm
-ExecStart=/usr/bin/python3 /home/michiel/lego_arm_master.py
+User=lego
+Group=lego
+WorkingDirectory=/path/to/lego-arm
+ExecStart=/usr/bin/python3 /path/to/lego_arm_master.py
 Environment=PORT=5001
-Environment=API_KEY=93f61c0e-1130-4606-8d64-8416473df146
+Environment=API_KEY=<YOUR_API_KEY>
 Environment=USE_FAKE_MOTORS=1
 # For localhost-only dev you may allow no auth:
 # Environment=ALLOW_NO_AUTH_LOCAL=1
