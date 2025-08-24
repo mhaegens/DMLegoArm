@@ -1,7 +1,20 @@
 <!doctype html>
 <meta charset="utf-8">
 <title>LEGO Arm API Tester</title>
-<style>body{font-family:sans-serif;max-width:700px;margin:32px auto} input,button,select,textarea{margin:6px 0;width:100%}</style>
+<style>
+body{font-family:"72","Arial","sans-serif";max-width:800px;margin:32px auto;background:#f7f7f7;color:#32363a}
+h1{color:#0a6ed1}
+label{display:block;margin-top:12px}
+input,textarea{width:100%;padding:8px;border:1px solid #ccc;border-radius:4px}
+button{padding:8px 12px;margin-top:8px;background:#0a6ed1;color:#fff;border:none;border-radius:4px;cursor:pointer}
+button:hover{background:#0854a0}
+pre{background:#111;color:#0f0;padding:12px;white-space:pre-wrap}
+.nudge-row{display:flex;align-items:center;margin-top:8px}
+.nudge-row span{flex:0 0 40px}
+.btn-group{display:flex;gap:8px;flex:1}
+.btn-group button{flex:1}
+</style>
+
 <h1>LEGO Arm API Tester</h1>
 <label>Base URL (Pi or ngrok): <input id="base" value="http://127.0.0.1:8000"></label>
 <label>API Key: <input id="key" placeholder="paste your API key"></label>
@@ -14,7 +27,27 @@
 <textarea id="moveBody" rows="6">{ "mode":"relative", "joints": {"A": 10, "B": -5}, "speed": 40 }</textarea>
 <button onclick="postJson('/v1/arm/move', moveBody.value)">POST /v1/arm/move</button>
 
-<pre id="out" style="background:#111;color:#0f0;padding:12px;white-space:pre-wrap"></pre>
+<h3>Manual motor nudges</h3>
+<div id="nudges">
+  <div class="nudge-row"><span>A</span><div class="btn-group">
+    <button onclick="nudge('A', -5)">-5°</button>
+    <button onclick="nudge('A', 5)">+5°</button>
+  </div></div>
+  <div class="nudge-row"><span>B</span><div class="btn-group">
+    <button onclick="nudge('B', -5)">-5°</button>
+    <button onclick="nudge('B', 5)">+5°</button>
+  </div></div>
+  <div class="nudge-row"><span>C</span><div class="btn-group">
+    <button onclick="nudge('C', -5)">-5°</button>
+    <button onclick="nudge('C', 5)">+5°</button>
+  </div></div>
+  <div class="nudge-row"><span>D</span><div class="btn-group">
+    <button onclick="nudge('D', -5)">-5°</button>
+    <button onclick="nudge('D', 5)">+5°</button>
+  </div></div>
+</div>
+
+<pre id="out"></pre>
 
 <script>
 async function call(method, path, body=null, auth=false){
@@ -30,5 +63,9 @@ async function call(method, path, body=null, auth=false){
 }
 function postJson(path, json){ return call('POST', path, json, true); }
 function pose(name){ return postJson('/v1/arm/pose', JSON.stringify({name, speed:60})); }
+function nudge(joint, deg){
+  const body=JSON.stringify({mode:"relative", joints:{[joint]:deg}, speed:40});
+  return postJson('/v1/arm/move', body);
+}
 const moveBody=document.getElementById('moveBody');
 </script>
