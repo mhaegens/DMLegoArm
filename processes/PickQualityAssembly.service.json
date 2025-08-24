@@ -1,5 +1,5 @@
 {
-"parameters": [
+    "parameters": [
         {
             "in": "header",
             "schema": {

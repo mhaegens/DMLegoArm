@@ -71,10 +71,17 @@ main
 
 Reusable arm workflows live in [`processes/`](processes). Each module exposes a
 `run(arm)` function and is registered in `processes/__init__.py`. Registered
-names automatically become REST endpoints at `POST /v1/processes/<name>`. See
-[`processes/README.md`](processes/README.md) for details on creating new
-workflows. Two sample processes are included: `pick-assembly-quality` and
-`pick-quality-assembly`.
+names automatically become REST endpoints at `POST /v1/processes/<name>`.
+
+The production processes shipped with this repo are:
+
+| Name                               | URL Path                                              |
+| ---------------------------------- | ----------------------------------------------------- |
+| LEGO_ARM_PICK_ASSEMBLY_QUALITY     | `https://<host>/v1/processes/pick-assembly-quality`   |
+| LEGO_ARM_PICK_QUALITY_ASSEMBLY     | `https://<host>/v1/processes/pick-quality-assembly`   |
+
+See [`processes/README.md`](processes/README.md) for details on creating new
+workflows.
 
 **Key components inside `lego_arm_master.py`:**
 

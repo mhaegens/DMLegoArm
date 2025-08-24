@@ -31,7 +31,7 @@
             "description": "Body Format"
         }
     ],
- main
+main
     "responses": {
         "200": {
             "description": "OK",
