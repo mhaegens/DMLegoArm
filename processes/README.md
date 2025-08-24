@@ -1,20 +1,25 @@
-# Production processes
 
-This directory stores reusable production processes for SAP Digital Manufacturing.
-Each process is a JSON file describing a sequence of API calls that the POD can
-trigger via button. Steps are executed in order.
+## Production processes
 
-## File format
+This folder hosts reusable production workflows that run **on the Raspberry Pi**.
+Each process is implemented as a small Python module exposing a `run(arm)`
+function. The REST API automatically exposes every entry in
+`processes.PROCESS_MAP` under:
 
-```json
-{
-  "description": "Short summary",
-  "steps": [
-    {"method": "POST", "path": "/v1/arm/pose", "body": {"name": "home", "speed": 60}},
-    {"method": "POST", "path": "/v1/arm/move", "body": {"mode": "relative", "joints": {"A": -90}, "speed": 50}}
-  ]
-}
+```
+POST /v1/processes/<name>
 ```
 
-Add new process files using the same structure so that future production
-processes can be maintained here.
+Calling an endpoint executes the corresponding sequence of arm movements.
+
+### Adding a new process
+
+1. Create a `<process_name>.py` file with a `run(arm)` function.
+2. Register it in `processes/__init__.py`'s `PROCESS_MAP`.
+3. The service will expose `POST /v1/processes/<process_name>`.
+
+All logic lives on the device so DM only needs to trigger the appropriate
+endpoint. This repo ships with example processes `pick-assembly-quality` and
+`pick-quality-assembly` that move parts between assembly and quality stations.
+
+ main
