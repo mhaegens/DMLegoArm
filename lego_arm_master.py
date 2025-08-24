@@ -10,6 +10,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse
 from typing import Dict, Optional, Literal
 
+# location of bundled web UI
+WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
+
 # ---------------------------
 # Hardware abstraction layer
 # ---------------------------
@@ -244,6 +247,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        if path in {"/", "/index.html", "/ui"}:
+            return self.serve_ui()
         if path == "/v1/health":
             return json_response(self, {"ok": True, "data": {"status": "ok", "time": time.time()}})
         if path == "/v1/inventory":
@@ -278,6 +283,18 @@ class Handler(BaseHTTPRequestHandler):
                 return json_response(self, {"ok": False, "error": {"code": "NOT_FOUND", "message": "Unknown operation id"}}, 404)
             return json_response(self, {"ok": True, "data": op})
         return json_response(self, {"ok": False, "error": {"code": "NOT_FOUND", "message": "Unknown path"}}, 404)
+
+    def serve_ui(self):
+        try:
+            with open(os.path.join(WEB_DIR, "index.html"), "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except FileNotFoundError:
+            json_response(self, {"ok": False, "error": {"code": "UI_MISSING", "message": "UI not found"}}, 500)
 
     def do_POST(self):
         parsed = urlparse(self.path)
