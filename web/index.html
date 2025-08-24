@@ -3,41 +3,53 @@
 <head>
 <meta charset="utf-8">
 <title>LEGO Arm Control</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=72&display=swap">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-body{font-family:"72",Arial,sans-serif;margin:0;background:#f5f6f7;color:#32363a}
-header{background:#0a6ed1;color:#fff;padding:16px;font-size:20px}
-main{max-width:900px;margin:20px auto;padding:0 20px}
-section{background:#fff;padding:16px;margin:16px 0;border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,0.1)}
+:root{--primary:#0a6ed1;--bg:#f5f6f7;--card:#fff;--text:#32363a}
+*{box-sizing:border-box}
+body{font-family:"Inter",Arial,sans-serif;margin:0;background:var(--bg);color:var(--text)}
+header{background:var(--primary);color:#fff;padding:16px 24px;font-size:20px;font-weight:600;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
+main{max-width:1000px;margin:24px auto;padding:0 24px 24px;display:grid;gap:24px}
+section{background:var(--card);padding:24px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.05)}
+section h2{margin-top:0;font-size:18px;border-bottom:1px solid #e5e7eb;padding-bottom:8px;margin-bottom:16px}
 label{display:block;margin-top:8px}
-input,button{padding:8px;font-size:14px;margin-top:4px}
-button{background:#0a6ed1;border:none;color:#fff;border-radius:2px;cursor:pointer;margin-right:8px}
+input,button{padding:8px 12px;font-size:14px;margin-top:4px;border:1px solid #d1d5db;border-radius:4px}
+button{background:var(--primary);border:none;color:#fff;border-radius:4px;cursor:pointer;transition:background 0.2s;margin-right:8px}
+button:hover{background:#0859a6}
 button:disabled{background:#9ca3af}
-pre{background:#000;color:#0f0;padding:10px;overflow:auto}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px}
+pre{background:#111;color:#0f0;padding:12px;overflow:auto;border-radius:4px;height:200px}
 #stateTable th{text-align:left;padding-right:8px}
 </style>
 </head>
 <body>
 <header>LEGO Arm Control</header>
 <main>
-<section id="auth">
+<section id="auth" class="grid">
 <label>API Key <input type="password" id="apiKey"></label>
 <label>Base URL <input id="base" placeholder="http://localhost:8000"></label>
-<button onclick="connect()">Connect</button>
+<div style="align-self:end"><button onclick="connect()">Connect</button></div>
 </section>
+
 <section id="status">
 <h2>Status</h2>
 <div id="statusText">Not connected.</div>
 <table id="stateTable"></table>
 </section>
+
 <section>
 <h2>Poses</h2>
+<div class="grid">
 <button onclick="pose('home')">Home</button>
 <button onclick="pose('pick_left')">Pick Left</button>
 <button onclick="pose('pick_right')">Pick Right</button>
 <button onclick="pose('place_left')">Place Left</button>
 <button onclick="pose('place_right')">Place Right</button>
+</div>
 </section>
+
 <section>
 <h2>Custom Move</h2>
 <div class="grid">
@@ -46,16 +58,18 @@ pre{background:#000;color:#0f0;padding:10px;overflow:auto}
 <label>Joint C <input id="jointC" type="number" value="0"></label>
 <label>Joint D <input id="jointD" type="number" value="0"></label>
 <label>Speed <input id="speed" type="number" value="60"></label>
-<button onclick="move()">Move</button>
+<div style="align-self:end"><button onclick="move()">Move</button></div>
 </div>
 </section>
+
 <section>
 <h2>Emergency</h2>
 <button onclick="stop()">Stop</button>
 </section>
+
 <section>
 <h2>Log</h2>
-<pre id="log" style="height:200px"></pre>
+<pre id="log"></pre>
 </section>
 </main>
 <script>
