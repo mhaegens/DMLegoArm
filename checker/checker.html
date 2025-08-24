@@ -51,6 +51,9 @@ pre{background:#111;color:#0f0;padding:12px;white-space:pre-wrap}
 
 <script>
 async function call(method, path, body=null, auth=false){
+  // Normalize the base URL by removing trailing slashes. The previous regex
+  // mistakenly removed backslashes instead of forward slashes, which could
+  // lead to URLs like "https://host//v1/health" that some proxies mis-handle.
   const base=document.getElementById('base').value.trim().replace(/\/+$/,'');
   const key=document.getElementById('key').value.trim();
   const headers={};
