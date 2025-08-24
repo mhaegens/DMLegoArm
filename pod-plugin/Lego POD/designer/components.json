@@ -1,0 +1,15 @@
+{
+	"components": [
+		{
+			"id": "legoarm",
+			"type": "VIEW_PLUGIN",
+			"allowMultipleInstances": false,
+			"name": "lego.haegens.plugins.legoarm",
+			"propertyEditor": "lego.haegens.plugins.legoarm.builder.PropertyEditor",
+			"i18n": "lego.haegens.plugins.legoarm.i18n.i18n",
+            "productionProcessEnabled": false,
+           "productionProcessTitle": "legoarm",
+			"supportedPodTypes": ["OPERATION","WORK_CENTER"]
+		}   
+	]
+}
