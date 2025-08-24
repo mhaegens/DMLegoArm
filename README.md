@@ -57,6 +57,7 @@ sudo reboot
 ```
 repo/
 ├─ lego_arm_master.py        # REST server + arm controller
+├─ processes/                # sample production process definitions
 ├─ web/
 │  └─ index.html             # built-in on-device control UI
 ├─ examples/
