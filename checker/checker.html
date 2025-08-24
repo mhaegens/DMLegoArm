@@ -51,15 +51,21 @@ pre{background:#111;color:#0f0;padding:12px;white-space:pre-wrap}
 
 <script>
 async function call(method, path, body=null, auth=false){
-  const base=document.getElementById('base').value.trim();
+  const base=document.getElementById('base').value.trim().replace(/\/+$/,'');
   const key=document.getElementById('key').value.trim();
-  const headers={"content-type":"application/json"};
+  const headers={};
+  if(body!=null) headers["content-type"]="application/json";
   if(auth && key) headers["x-api-key"]=key;
-  // Helpful for ngrok in browser:
-  headers["ngrok-skip-browser-warning"]="1";
-  const res=await fetch(base+path,{method,headers,body});
-  const text=await res.text();
-  document.getElementById('out').textContent = res.status+" "+res.statusText+"\n\n"+text;
+  let url=base+path;
+  // For ngrok public URLs append query flag instead of custom header to avoid CORS preflight
+  if(/\.ngrok/.test(base)) url += (url.includes('?')?'&':'?')+ 'ngrok-skip-browser-warning=1';
+  try{
+    const res=await fetch(url,{method,headers,body});
+    const text=await res.text();
+    document.getElementById('out').textContent = res.status+" "+res.statusText+"\n\n"+text;
+  }catch(err){
+    document.getElementById('out').textContent = 'Fetch error: '+err;
+  }
 }
 function postJson(path, json){ return call('POST', path, json, true); }
 function pose(name){ return postJson('/v1/arm/pose', JSON.stringify({name, speed:60})); }
