@@ -59,9 +59,8 @@ async function call(method, path, body=null, auth=false){
   const headers={};
   if(body!=null) headers["content-type"]="application/json";
   if(auth && key) headers["x-api-key"]=key;
-  let url=base+path;
-  // For ngrok public URLs append query flag instead of custom header to avoid CORS preflight
-  if(/\.ngrok/.test(base)) url += (url.includes('?')?'&':'?')+ 'ngrok-skip-browser-warning=1';
+  if(/\.ngrok/.test(base)) headers["ngrok-skip-browser-warning"]="1";
+  const url=base+path;
   try{
     const res=await fetch(url,{method,headers,body});
     const text=await res.text();
