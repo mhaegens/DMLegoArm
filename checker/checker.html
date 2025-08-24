@@ -1,0 +1,34 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LEGO Arm API Tester</title>
+<style>body{font-family:sans-serif;max-width:700px;margin:32px auto} input,button,select,textarea{margin:6px 0;width:100%}</style>
+<h1>LEGO Arm API Tester</h1>
+<label>Base URL (Pi or ngrok): <input id="base" value="http://127.0.0.1:8000"></label>
+<label>API Key: <input id="key" placeholder="paste your API key"></label>
+
+<button onclick="call('GET','/v1/health')">GET /v1/health</button>
+<button onclick="call('GET','/v1/inventory',null,true)">GET /v1/inventory (auth)</button>
+<button onclick="pose('home')">POST /v1/arm/pose {name:'home'}</button>
+
+<h3>Custom move</h3>
+<textarea id="moveBody" rows="6">{ "mode":"relative", "joints": {"A": 10, "B": -5}, "speed": 40 }</textarea>
+<button onclick="postJson('/v1/arm/move', moveBody.value)">POST /v1/arm/move</button>
+
+<pre id="out" style="background:#111;color:#0f0;padding:12px;white-space:pre-wrap"></pre>
+
+<script>
+async function call(method, path, body=null, auth=false){
+  const base=document.getElementById('base').value.trim();
+  const key=document.getElementById('key').value.trim();
+  const headers={"content-type":"application/json"};
+  if(auth && key) headers["x-api-key"]=key;
+  // Helpful for ngrok in browser:
+  headers["ngrok-skip-browser-warning"]="1";
+  const res=await fetch(base+path,{method,headers,body});
+  const text=await res.text();
+  document.getElementById('out').textContent = res.status+" "+res.statusText+"\n\n"+text;
+}
+function postJson(path, json){ return call('POST', path, json, true); }
+function pose(name){ return postJson('/v1/arm/pose', JSON.stringify({name, speed:60})); }
+const moveBody=document.getElementById('moveBody');
+</script>
