@@ -1,5 +1,5 @@
 {
-    "parameters": [
+"parameters": [
         {
             "in": "header",
             "schema": {
@@ -31,6 +31,7 @@
             "description": "Body Format"
         }
     ],
+main
     "responses": {
         "200": {
             "description": "OK",
