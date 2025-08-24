@@ -13,6 +13,8 @@ from typing import Dict, Optional, Literal
 # location of bundled web UI
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 
+from processes import PROCESS_MAP
+
 # ---------------------------
 # Hardware abstraction layer
 # ---------------------------
@@ -254,6 +256,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/v1/inventory":
             if (resp := auth_ok(self)):
                 return json_response(self, resp[0], resp[1])
+            process_eps = [f"POST /v1/processes/{name}" for name in PROCESS_MAP]
             data = {
                 "endpoints": [
                     "GET /v1/health",
@@ -264,8 +267,9 @@ class Handler(BaseHTTPRequestHandler):
                     "POST /v1/arm/stop",
                     "POST /v1/arm/pickplace",
                     "GET /v1/operations/{id}",
-                ],
+                ] + process_eps,
                 "poses": ["home", "pick_left", "pick_right", "place_left", "place_right"],
+                "processes": list(PROCESS_MAP.keys()),
                 "motors": list(arm.motors.keys()),
             }
             return json_response(self, {"ok": True, "data": data})
@@ -299,7 +303,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
-        if path in ("/v1/arm/move", "/v1/arm/pose", "/v1/arm/pickplace", "/v1/arm/stop"):
+        if path.startswith("/v1/processes/") or path in ("/v1/arm/move", "/v1/arm/pose", "/v1/arm/pickplace", "/v1/arm/stop"):
             if (resp := auth_ok(self)):
                 return json_response(self, resp[0], resp[1])
         if path == "/v1/arm/stop":
@@ -313,6 +317,16 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             body = parse_json(self)
+            if path.startswith("/v1/processes/"):
+                name = path.split("/v1/processes/")[-1]
+                proc = PROCESS_MAP.get(name)
+                if not proc:
+                    return json_response(self, {"ok": False, "error": {"code": "UNKNOWN_PROCESS", "message": "Unknown process"}}, 404)
+                res = proc(arm)
+                resp = {"ok": True, "data": res}
+                idem_store(self, resp)
+                return json_response(self, resp)
+
             if path == "/v1/arm/move":
                 mode = body.get("mode", "relative")
                 joints = body.get("joints") or {}

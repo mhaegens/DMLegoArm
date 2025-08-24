@@ -9,7 +9,7 @@ This README documents the **final architecture** we shipped, why we chose it, ho
 ## At a glance
 
 * **Single file server**: `lego_arm_master.py` (Python standard library only; no pip installs)
-* **Endpoints**: `/v1/*` (health, state, move, pose, pick/place, stop, async ops)
+* **Endpoints**: `/v1/*` (health, state, move, pose, pick/place, stop, async ops, production processes)
 * **Auth**: API key in header `x-api-key`
 * **Idempotency**: `X-Idempotency-Key` (in-memory cache; 5-minute TTL)
 * **Async**: Background worker + `GET /v1/operations/{id}`
@@ -57,6 +57,7 @@ sudo reboot
 ```
 repo/
 ├─ lego_arm_master.py        # REST server + arm controller
+├─ processes/                # on-device production process modules
 ├─ web/
 │  └─ index.html             # built-in on-device control UI
 ├─ examples/
@@ -64,6 +65,14 @@ repo/
 └─ systemd/
    └─ legoarm.service        # optional unit file (example below)
 ```
+
+### Production processes
+
+Reusable arm workflows live in [`processes/`](processes). Each module exposes a
+`run(arm)` function and is registered in `processes/__init__.py`. Registered
+names automatically become REST endpoints at `POST /v1/processes/<name>`. See
+[`processes/README.md`](processes/README.md) for details on creating new
+workflows.
 
 **Key components inside `lego_arm_master.py`:**
 
@@ -411,6 +420,10 @@ curl https://<ngrok>/v1/inventory -H "x-api-key: <YOUR_KEY>" -H "ngrok-skip-brow
 curl -X POST https://<ngrok>/v1/arm/pose \
   -H "content-type: application/json" -H "x-api-key: <YOUR_KEY>" -H "ngrok-skip-browser-warning: 1" \
   -d '{"name":"home","speed":60}'
+
+# Run built-in process
+curl -X POST https://<ngrok>/v1/processes/pick-assembly-quality \
+  -H "x-api-key: <YOUR_KEY>" -H "ngrok-skip-browser-warning: 1"
 ```
 
 ---
