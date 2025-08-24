@@ -58,6 +58,7 @@ sudo reboot
 repo/
 ├─ lego_arm_master.py        # REST server + arm controller
 ├─ processes/                # on-device production process modules
+main
 ├─ web/
 │  └─ index.html             # built-in on-device control UI
 ├─ examples/
@@ -162,13 +163,13 @@ curl http://127.0.0.1:8000/v1/health
 ```bash
 ngrok http 8000
 # copy the HTTPS URL it prints, e.g.:
-# https://hound-pleasing-llama.ngrok-free.app  -> http://localhost:8000
+# https://<YOUR_NGROK_URL>  -> http://localhost:8000
 ```
 
 Use **the HTTPS URL without a port** in browsers/DM:
 
 ```
-https://hound-pleasing-llama.ngrok-free.app/v1/health
+https://<YOUR_NGROK_URL>/v1/health
 ```
 
 ---
