@@ -57,6 +57,8 @@ sudo reboot
 ```
 repo/
 ├─ lego_arm_master.py        # REST server + arm controller
+├─ web/
+│  └─ index.html             # built-in on-device control UI
 ├─ examples/
 │  └─ tester.html            # tiny browser client for manual testing
 └─ systemd/
@@ -290,6 +292,12 @@ Create buttons that call the service:
 Because headers are set in the Service Registry, you only supply **method/path/body** per action.
 
 ---
+
+## On-device web UI
+
+With the service running on the Raspberry Pi you can visit `http://<pi>:8000/` or your ngrok URL to access a small control panel.
+It shows current joint positions and provides buttons for common poses, custom moves, and an emergency stop. Enter the API key
+and base URL at the top if authentication is enabled.
 
 ## Tester page (manual browser testing)
 
