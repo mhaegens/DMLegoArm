@@ -8,7 +8,7 @@ User=michiel
 Group=michiel
 WorkingDirectory=/home/michiel/lego-arm
 ExecStart=/usr/bin/python3 /home/michiel/lego_arm_master.py
-Environment=PORT=8000
+Environment=PORT=5001
 Environment=API_KEY=93f61c0e-1130-4606-8d64-8416473df146
 Environment=USE_FAKE_MOTORS=1
 # For localhost-only dev you may allow no auth:
