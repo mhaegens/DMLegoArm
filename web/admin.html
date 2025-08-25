@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>LEGO Arm Admin</title>
+  <link rel="stylesheet" href="tailwind.css" />
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+</head>
+<body class="bg-gray-100">
+  <div id="root"></div>
+  <script>
+    const { useState } = React;
+    const e = React.createElement;
+
+    function Admin(){
+      const defaultBase = window.location.origin.startsWith('http') ? '' : 'http://localhost:8000';
+      const [apiKey, setApiKey] = useState(localStorage.getItem('apiKey') || '');
+      const [base, setBase] = useState(localStorage.getItem('base') || defaultBase);
+      const [status, setStatus] = useState('');
+
+      const save = () => {
+        localStorage.setItem('apiKey', apiKey);
+        localStorage.setItem('base', base);
+        setStatus('Saved');
+      };
+
+      const test = async () => {
+        setStatus('');
+        try{
+          const headers = {'ngrok-skip-browser-warning':'1'};
+          if(apiKey) headers['x-api-key'] = apiKey;
+          const res = await fetch(base + '/v1/health',{headers});
+          setStatus(res.ok ? 'Connected' : 'Error '+res.status);
+        }catch(e){
+          setStatus('Error');
+        }
+      };
+
+      return e('div',{className:'min-h-screen flex flex-col'},
+        e('header',{className:'bg-blue-600 text-white'},
+          e('div',{className:'max-w-5xl mx-auto p-4 flex justify-between'},
+            e('h1',{className:'font-semibold'},'Admin'),
+            e('a',{href:'index.html',className:'px-4 py-1 rounded-full bg-white/20'},'Back')
+          )
+        ),
+        e('main',{className:'flex-1 bg-gray-50'},
+          e('div',{className:'max-w-5xl mx-auto p-4 space-y-4'},
+            e('section',{className:'bg-white rounded-xl shadow p-6'},
+              e('h2',{className:'text-lg font-semibold text-blue-600 mb-4'},'API Settings'),
+              e('div',{className:'grid sm:grid-cols-2 gap-4'},
+                e('label',{className:'text-sm font-medium'},'API Key',
+                  e('input',{type:'password',value:apiKey,onChange:e=>setApiKey(e.target.value),className:'mt-1 w-full border rounded p-2'})
+                ),
+                e('label',{className:'text-sm font-medium'},'Base URL',
+                  e('input',{value:base,onChange:e=>setBase(e.target.value),className:'mt-1 w-full border rounded p-2'})
+                )
+              ),
+              e('div',{className:'flex gap-2 mt-4'},
+                e('button',{onClick:save,className:'bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700'},'Save'),
+                e('button',{onClick:test,className:'bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700'},'Test')
+              ),
+              status && e('p',{className:'mt-4 text-sm'}, status)
+            )
+          )
+        )
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(e(Admin));
+  </script>
+</body>
+</html>
+
