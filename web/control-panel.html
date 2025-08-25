@@ -45,11 +45,8 @@
 
     function App(){
       const [baseUrl,setBaseUrl]=useLocalStorage("ra.baseUrl","");
-      const [token,setToken]=useLocalStorage("ra.token","");
       const [apiKey,setApiKey]=useLocalStorage("ra.apiKey","");
       const [connected,setConnected]=useState(false);
-      const [armState,setArmState]=useState("idle");
-      const [version,setVersion]=useState("");
       const [motors,setMotors]=useLocalStorage("ra.motors",defaultMotors);
       const [logs,setLogs]=useLocalStorage("ra.logs",[]);
       const [step,setStep]=useLocalStorage("ra.step",5);
@@ -62,7 +59,7 @@
       useEffect(()=>{if(logRef.current)logRef.current.scrollTop=logRef.current.scrollHeight;},[logs]);
 
       function addLog(e){const ts=new Date().toLocaleTimeString();setLogs(l=>[...l.slice(-999),{ts,...e}]);}
-      function headers(){const h={"Content-Type":"application/json","ngrok-skip-browser-warning":"1"};if(token)h["Authorization"]="Bearer "+token;if(apiKey)h["x-api-key"]=apiKey;return h;}
+      function headers(){const h={"Content-Type":"application/json","ngrok-skip-browser-warning":"1"};if(apiKey)h["x-api-key"]=apiKey;return h;}
       async function api(method,path,body){
         if(!baseUrl){addLog({level:"err",text:"Base URL not set"});throw new Error("Base URL not set");}
         const url=baseUrl.replace(/\/$/,"")+path;
@@ -90,7 +87,7 @@
       async function nudge(m,d){const name=m.name||("M"+m.id);const joints={};joints[name]=d;await api("POST","/v1/arm/move",{mode:"relative",joints,speed:60}).catch(()=>{});setMotors(p=>p.map(x=>x.id===m.id?{...x,pos:x.pos+d}:x));}
       async function runCustom(){let body;try{body=customBody?JSON.parse(customBody):undefined;}catch{alert("Invalid JSON body");return;}await api(customMethod,customPath,body);}
 
-      useEffect(()=>{checkHealth();const id=setInterval(checkHealth,15000);return()=>clearInterval(id);},[baseUrl,token,apiKey]);
+      useEffect(()=>{checkHealth();const id=setInterval(checkHealth,15000);return()=>clearInterval(id);},[baseUrl,apiKey]);
 
       // Compact pill variants
       const MotorPill=({children})=>(<div className="glass inline-flex items-center gap-1 px-2 py-1 rounded-full text-white text-[11px]">{children}</div>);
@@ -259,13 +256,11 @@
                 <p className="text-sm text-slate-600 mb-4">Connection settings are stored locally in your browser.</p>
                 <label className="block text-xs text-slate-600 mb-1">Base URL</label>
                 <input className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 mb-3" placeholder="https://your-ngrok-url.example" value={baseUrl} onChange={e=>setBaseUrl(e.target.value)} />
-                <label className="block text-xs text-slate-600 mb-1">Bearer token (optional)</label>
-                <input className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 mb-3" placeholder="token..." value={token} onChange={e=>setToken(e.target.value)} />
-                <label className="block text-xs text-slate-600 mb-1">X-API-Key (optional)</label>
+                <label className="block text-xs text-slate-600 mb-1">API key (optional)</label>
                 <input className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 mb-6" placeholder="api key..." value={apiKey} onChange={e=>setApiKey(e.target.value)} />
                 <div className="mt-auto flex gap-2">
                   <button className="px-3 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white" onClick={()=>setAdminOpen(false)}>Save</button>
-                  <button className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={()=>{setBaseUrl('');setToken('');setApiKey('');}}>Clear</button>
+                  <button className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={()=>{setBaseUrl('');setApiKey('');}}>Clear</button>
                 </div>
               </aside>
             </div>
