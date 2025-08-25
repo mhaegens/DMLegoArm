@@ -28,7 +28,7 @@ sap.ui.define([
       this.addInputField(oPropertyFormContainer, "text", oData);
 
       // New: External API configuration
-      // Base URL for the LEGO Arm API (e.g., http://legopi.local:5000)
+      // Base URL for the LEGO Arm API (e.g., http://legopi.local:8000)
       this.addInputField(oPropertyFormContainer, "baseUrl", oData);
 
       // Auth mode (string). Use: none | basic | bearer | x-api-key
@@ -53,7 +53,7 @@ sap.ui.define([
         "text": "legoarm",
 
         // new
-        "baseUrl": "http://legopi.local:5000",
+        "baseUrl": "http://legopi.local:8000",
         "authMode": "none",       // none | basic | bearer | x-api-key
         "username": "",
         "password": "",

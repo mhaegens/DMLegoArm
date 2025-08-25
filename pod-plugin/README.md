@@ -19,7 +19,7 @@ You can configure the following properties in the POD Designer or at runtime:
 
 | Property      | Description |
 |---------------|-------------|
-| `baseUrl`     | HTTP base of the DMLegoArm API (default `http://legopi.local:5000`). |
+| `baseUrl`     | HTTP base of the DMLegoArm API (default `http://legopi.local:8000`). |
 | `authMode`    | `none`, `basic`, `bearer` or `x-api-key`. |
 | `username` / `password` | Used when `authMode` is `basic`. |
 | `bearerToken` | Used when `authMode` is `bearer`. |
