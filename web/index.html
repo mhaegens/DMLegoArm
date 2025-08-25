@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>LEGO Arm Control</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@3.4.4/dist/tailwind.min.css" />
+  <link rel="stylesheet" href="tailwind.css" />
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 </head>
@@ -13,6 +13,8 @@
   <script>
     const { useState, useEffect, useRef } = React;
     const e = React.createElement;
+
+
     function App(){
       const [apiKey, setApiKey] = useState('');
       const defaultBase = window.location.origin.startsWith('http') ? '' : 'http://localhost:8000';
