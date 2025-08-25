@@ -9,6 +9,7 @@ import queue
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse
 from typing import Dict, Optional, Literal
+import mimetypes
 
 # location of bundled web UI
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
@@ -286,6 +287,13 @@ class Handler(BaseHTTPRequestHandler):
             if not op:
                 return json_response(self, {"ok": False, "error": {"code": "NOT_FOUND", "message": "Unknown operation id"}}, 404)
             return json_response(self, {"ok": True, "data": op})
+        # attempt to serve static files from WEB_DIR
+        if not path.startswith("/v1/"):
+            rel_path = os.path.normpath(path.lstrip("/"))
+            if rel_path and not rel_path.startswith(".."):
+                static_path = os.path.join(WEB_DIR, rel_path)
+                if os.path.isfile(static_path):
+                    return self.serve_static(static_path)
         return json_response(self, {"ok": False, "error": {"code": "NOT_FOUND", "message": "Unknown path"}}, 404)
 
     def serve_ui(self):
@@ -299,6 +307,19 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         except FileNotFoundError:
             json_response(self, {"ok": False, "error": {"code": "UI_MISSING", "message": "UI not found"}}, 500)
+
+    def serve_static(self, filepath: str):
+        try:
+            with open(filepath, "rb") as f:
+                body = f.read()
+            ctype, _ = mimetypes.guess_type(filepath)
+            self.send_response(200)
+            self.send_header("Content-Type", ctype or "application/octet-stream")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except FileNotFoundError:
+            return json_response(self, {"ok": False, "error": {"code": "NOT_FOUND", "message": "Unknown path"}}, 404)
 
     def do_POST(self):
         parsed = urlparse(self.path)
