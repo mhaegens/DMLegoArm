@@ -4,16 +4,15 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>LEGO Arm Control</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@3.4.4/dist/tailwind.min.css" />
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
 </head>
 <body class="bg-gray-100">
   <div id="root"></div>
-  <script type="text/babel">
+  <script>
     const { useState, useEffect, useRef } = React;
-
+    const e = React.createElement;
     function App(){
       const [apiKey, setApiKey] = useState('');
       const [base, setBase] = useState(window.location.origin);
@@ -35,7 +34,7 @@
         addLog(method+' '+path+' -> '+res.status);
         if(!res.ok) throw new Error(await res.text());
         const text = await res.text();
-        try{ return JSON.parse(text).data; }catch{return null;}
+        try{ return JSON.parse(text).data; }catch(e){ return null; }
       };
 
       const getState = async () => {
@@ -68,72 +67,69 @@
 
       useEffect(()=>{connect(); return ()=>poller.current && clearInterval(poller.current);},[]);
 
-      return (
-        <div className="min-h-screen flex flex-col">
-          <header className="bg-blue-600 text-white">
-            <div className="max-w-5xl mx-auto p-4 flex flex-col items-center">
-              <div className="w-full flex justify-between mb-4">
-                <div className="px-4 py-1 rounded-full bg-white/20">{status}</div>
-                <div className="px-4 py-1 rounded-full bg-white/20">Motors {Object.keys(positions).length? 'OK':'--'}</div>
-              </div>
-              <img src="robot-arm.png" alt="Robot arm" className="h-40 object-contain" />
-              <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-2 w-full">
-                {Object.entries(positions).map(([k,v])=> (
-                  <div key={k} className="bg-white/20 rounded-full px-3 py-1 text-center text-sm">{k}: {v.toFixed(1)}°</div>
-                ))}
-              </div>
-            </div>
-          </header>
-          <main className="flex-1 bg-gray-50">
-            <div className="max-w-5xl mx-auto p-4 space-y-4">
-              <section className="bg-white rounded-xl shadow p-6">
-                <h2 className="text-lg font-semibold text-blue-600 mb-4">General Commands</h2>
-                <div className="grid sm:grid-cols-2 gap-4">
-                  <label className="text-sm font-medium">API Key
-                    <input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)} className="mt-1 w-full border rounded p-2" />
-                  </label>
-                  <label className="text-sm font-medium">Base URL
-                    <input value={base} onChange={e=>setBase(e.target.value)} className="mt-1 w-full border rounded p-2" />
-                  </label>
-                </div>
-                <div className="flex flex-wrap gap-2 mt-4">
-                  <button onClick={connect} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Connect</button>
-                  <button onClick={health} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Health</button>
-                  <button onClick={inventory} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Inventory</button>
-                  <button onClick={home} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Home</button>
-                  <button onClick={stop} className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">Stop</button>
-                </div>
-              </section>
-              <section className="bg-white rounded-xl shadow p-6">
-                <h2 className="text-lg font-semibold text-blue-600 mb-4">Console</h2>
-                <pre className="bg-black text-green-400 rounded p-3 h-40 overflow-auto whitespace-pre-wrap">{log}</pre>
-              </section>
-              <section className="bg-white rounded-xl shadow p-6">
-                <h2 className="text-lg font-semibold text-blue-600 mb-4">Nudge Controls</h2>
-                <div className="flex flex-wrap gap-4 mb-4">
-                  <label className="text-sm font-medium">Motor
-                    <select value={motor} onChange={e=>setMotor(e.target.value)} className="mt-1 border rounded p-2">
-                      {['A','B','C','D'].map(m => <option key={m} value={m}>{m}</option>)}
-                    </select>
-                  </label>
-                  <label className="text-sm font-medium">Step (°)
-                    <input type="number" value={step} onChange={e=>setStep(e.target.value)} className="mt-1 w-24 border rounded p-2" />
-                  </label>
-                </div>
-                <div className="grid grid-cols-3 grid-rows-3 gap-3 w-32 mx-auto">
-                  <button onClick={()=>nudge('up')} className="col-start-2 row-start-1 w-10 h-10 rounded-full bg-gray-200 hover:bg-gray-300 active:bg-gray-400 flex items-center justify-center">▲</button>
-                  <button onClick={()=>nudge('left')} className="col-start-1 row-start-2 w-10 h-10 rounded-full bg-gray-200 hover:bg-gray-300 active:bg-gray-400 flex items-center justify-center">◀</button>
-                  <button onClick={()=>nudge('right')} className="col-start-3 row-start-2 w-10 h-10 rounded-full bg-gray-200 hover:bg-gray-300 active:bg-gray-400 flex items-center justify-center">▶</button>
-                  <button onClick={()=>nudge('down')} className="col-start-2 row-start-3 w-10 h-10 rounded-full bg-gray-200 hover:bg-gray-300 active:bg-gray-400 flex items-center justify-center">▼</button>
-                </div>
-              </section>
-            </div>
-          </main>
-        </div>
+      const positionElems = Object.entries(positions).map(([k,v]) =>
+        e('div', {key:k, className:'bg-white/20 rounded-full px-3 py-1 text-center text-sm'}, `${k}: ${v.toFixed(1)}°`)
+      );
+      const motorOptions = ['A','B','C','D'].map(m => e('option',{key:m,value:m},m));
+
+      return e('div',{className:'min-h-screen flex flex-col'},
+        e('header',{className:'bg-blue-600 text-white'},
+          e('div',{className:'max-w-5xl mx-auto p-4 flex flex-col items-center'},
+            e('div',{className:'w-full flex justify-between mb-4'},
+              e('div',{className:'px-4 py-1 rounded-full bg-white/20'}, status),
+              e('div',{className:'px-4 py-1 rounded-full bg-white/20'}, `Motors ${Object.keys(positions).length? 'OK':'--'}`)
+            ),
+            e('img',{src:'robot-arm.png',alt:'Robot arm',className:'h-40 object-contain'}),
+            e('div',{className:'mt-4 grid grid-cols-2 sm:grid-cols-4 gap-2 w-full'}, positionElems)
+          )
+        ),
+        e('main',{className:'flex-1 bg-gray-50'},
+          e('div',{className:'max-w-5xl mx-auto p-4 space-y-4'},
+            e('section',{className:'bg-white rounded-xl shadow p-6'},
+              e('h2',{className:'text-lg font-semibold text-blue-600 mb-4'},'General Commands'),
+              e('div',{className:'grid sm:grid-cols-2 gap-4'},
+                e('label',{className:'text-sm font-medium'},'API Key',
+                  e('input',{type:'password',value:apiKey,onChange:e=>setApiKey(e.target.value),className:'mt-1 w-full border rounded p-2'})
+                ),
+                e('label',{className:'text-sm font-medium'},'Base URL',
+                  e('input',{value:base,onChange:e=>setBase(e.target.value),className:'mt-1 w-full border rounded p-2'})
+                )
+              ),
+              e('div',{className:'flex flex-wrap gap-2 mt-4'},
+                e('button',{onClick:connect,className:'bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700'},'Connect'),
+                e('button',{onClick:health,className:'bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700'},'Health'),
+                e('button',{onClick:inventory,className:'bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700'},'Inventory'),
+                e('button',{onClick:home,className:'bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700'},'Home'),
+                e('button',{onClick:stop,className:'bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700'},'Stop')
+              )
+            ),
+            e('section',{className:'bg-white rounded-xl shadow p-6'},
+              e('h2',{className:'text-lg font-semibold text-blue-600 mb-4'},'Console'),
+              e('pre',{className:'bg-black text-green-400 rounded p-3 h-40 overflow-auto whitespace-pre-wrap'}, log)
+            ),
+            e('section',{className:'bg-white rounded-xl shadow p-6'},
+              e('h2',{className:'text-lg font-semibold text-blue-600 mb-4'},'Nudge Controls'),
+              e('div',{className:'flex flex-wrap gap-4 mb-4'},
+                e('label',{className:'text-sm font-medium'},'Motor',
+                  e('select',{value:motor,onChange:e=>setMotor(e.target.value),className:'mt-1 border rounded p-2'}, motorOptions)
+                ),
+                e('label',{className:'text-sm font-medium'},'Step (°)',
+                  e('input',{type:'number',value:step,onChange:e=>setStep(e.target.value),className:'mt-1 w-24 border rounded p-2'})
+                )
+              ),
+              e('div',{className:'grid grid-cols-3 grid-rows-3 gap-3 w-32 mx-auto'},
+                e('button',{onClick:()=>nudge('up'),className:'col-start-2 row-start-1 w-10 h-10 rounded-full bg-gray-200 hover:bg-gray-300 active:bg-gray-400 flex items-center justify-center'},'▲'),
+                e('button',{onClick:()=>nudge('left'),className:'col-start-1 row-start-2 w-10 h-10 rounded-full bg-gray-200 hover:bg-gray-300 active:bg-gray-400 flex items-center justify-center'},'◀'),
+                e('button',{onClick:()=>nudge('right'),className:'col-start-3 row-start-2 w-10 h-10 rounded-full bg-gray-200 hover:bg-gray-300 active:bg-gray-400 flex items-center justify-center'},'▶'),
+                e('button',{onClick:()=>nudge('down'),className:'col-start-2 row-start-3 w-10 h-10 rounded-full bg-gray-200 hover:bg-gray-300 active:bg-gray-400 flex items-center justify-center'},'▼')
+              )
+            )
+          )
+        )
       );
     }
 
-    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    ReactDOM.createRoot(document.getElementById('root')).render(e(App));
   </script>
 </body>
 </html>
