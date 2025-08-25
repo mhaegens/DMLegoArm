@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>LEGO Arm Control</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -9,68 +10,104 @@
 <style>
 :root{--primary:#0a6ed1;--bg:#f5f6f7;--card:#fff;--text:#32363a}
 *{box-sizing:border-box}
-body{font-family:"Inter",Arial,sans-serif;margin:0;background:var(--bg);color:var(--text)}
+body{font-family:"Inter",Arial,sans-serif;margin:0;background:var(--bg);color:var(--text);line-height:1.4}
 header{background:var(--primary);color:#fff;padding:16px 24px;font-size:20px;font-weight:600;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
-main{max-width:1000px;margin:24px auto;padding:0 24px 24px;display:grid;gap:24px}
-section{background:var(--card);padding:24px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.05)}
-section h2{margin-top:0;font-size:18px;border-bottom:1px solid #e5e7eb;padding-bottom:8px;margin-bottom:16px}
+main{max-width:1100px;margin:24px auto;padding:0 24px 24px;display:grid;gap:24px}
+.card{background:var(--card);padding:24px;border-radius:12px;box-shadow:0 2px 4px rgba(0,0,0,0.05)}
+.card h2{margin-top:0;font-size:18px;border-bottom:1px solid #e5e7eb;padding-bottom:8px;margin-bottom:16px}
 label{display:block;margin-top:8px}
-input,button{padding:8px 12px;font-size:14px;margin-top:4px;border:1px solid #d1d5db;border-radius:4px}
+input,select,button{padding:8px 12px;font-size:14px;margin-top:4px;border:1px solid #d1d5db;border-radius:4px}
 button{background:var(--primary);border:none;color:#fff;border-radius:4px;cursor:pointer;transition:background 0.2s;margin-right:8px}
 button:hover{background:#0859a6}
 button:disabled{background:#9ca3af}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px}
-pre{background:#111;color:#0f0;padding:12px;overflow:auto;border-radius:4px;height:200px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
+.nudge{display:flex;gap:8px;margin-top:16px}
+.nudge button{flex:1;font-size:18px;padding:12px 0}
+.control-layout{display:flex;flex-wrap:wrap;gap:24px;align-items:center}
+.arm-img{max-width:300px;width:100%;height:auto;margin:auto}
 #stateTable th{text-align:left;padding-right:8px}
+@media (max-width:600px){
+  main{padding:0 12px 24px}
+  .control-layout{flex-direction:column}
+  .arm-img{max-width:200px}
+}
 </style>
 </head>
 <body>
 <header>LEGO Arm Control</header>
 <main>
-<section id="auth" class="grid">
-<label>API Key <input type="password" id="apiKey"></label>
-<label>Base URL <input id="base" placeholder="http://localhost:8000"></label>
-<div style="align-self:end"><button onclick="connect()">Connect</button></div>
-</section>
+  <section id="auth" class="card">
+    <h2>Connection</h2>
+    <div class="grid">
+      <label>API Key <input type="password" id="apiKey"></label>
+      <label>Base URL <input id="base" placeholder="http://localhost:8000"></label>
+      <div style="align-self:end"><button onclick="connect()">Connect</button></div>
+    </div>
+  </section>
 
-<section id="status">
-<h2>Status</h2>
-<div id="statusText">Not connected.</div>
-<table id="stateTable"></table>
-</section>
+  <section id="control" class="card">
+    <h2>Manual Control</h2>
+    <div class="control-layout">
+      <img src="robot-arm.svg" alt="Robot Arm" class="arm-img">
+      <div style="flex:1;min-width:200px">
+        <label>Motor
+          <select id="motor">
+            <option value="A">A</option>
+            <option value="B">B</option>
+            <option value="C">C</option>
+            <option value="D">D</option>
+          </select>
+        </label>
+        <label>Step (°)
+          <input id="step" type="number" value="5">
+        </label>
+        <div class="nudge">
+          <button onclick="nudge(-1)">&#8592;</button>
+          <button onclick="nudge(1)">&#8594;</button>
+        </div>
+        <button style="margin-top:16px" onclick="getCurrent()">Get Current Position</button>
+      </div>
+    </div>
+  </section>
 
-<section>
-<h2>Poses</h2>
-<div class="grid">
-<button onclick="pose('home')">Home</button>
-<button onclick="pose('pick_left')">Pick Left</button>
-<button onclick="pose('pick_right')">Pick Right</button>
-<button onclick="pose('place_left')">Place Left</button>
-<button onclick="pose('place_right')">Place Right</button>
-</div>
-</section>
+  <section id="status" class="card">
+    <h2>Status</h2>
+    <div id="statusText">Not connected.</div>
+    <table id="stateTable"></table>
+  </section>
 
-<section>
-<h2>Custom Move</h2>
-<div class="grid">
-<label>Joint A <input id="jointA" type="number" value="0"></label>
-<label>Joint B <input id="jointB" type="number" value="0"></label>
-<label>Joint C <input id="jointC" type="number" value="0"></label>
-<label>Joint D <input id="jointD" type="number" value="0"></label>
-<label>Speed <input id="speed" type="number" value="60"></label>
-<div style="align-self:end"><button onclick="move()">Move</button></div>
-</div>
-</section>
+  <section class="card">
+    <h2>Poses</h2>
+    <div class="grid">
+      <button onclick="pose('home')">Home</button>
+      <button onclick="pose('pick_left')">Pick Left</button>
+      <button onclick="pose('pick_right')">Pick Right</button>
+      <button onclick="pose('place_left')">Place Left</button>
+      <button onclick="pose('place_right')">Place Right</button>
+    </div>
+  </section>
 
-<section>
-<h2>Emergency</h2>
-<button onclick="stop()">Stop</button>
-</section>
+  <section class="card">
+    <h2>Custom Move</h2>
+    <div class="grid">
+      <label>Joint A <input id="jointA" type="number" value="0"></label>
+      <label>Joint B <input id="jointB" type="number" value="0"></label>
+      <label>Joint C <input id="jointC" type="number" value="0"></label>
+      <label>Joint D <input id="jointD" type="number" value="0"></label>
+      <label>Speed <input id="speed" type="number" value="60"></label>
+      <div style="align-self:end"><button onclick="move()">Move</button></div>
+    </div>
+  </section>
 
-<section>
-<h2>Log</h2>
-<pre id="log"></pre>
-</section>
+  <section class="card">
+    <h2>Emergency</h2>
+    <button onclick="stop()">Stop</button>
+  </section>
+
+  <section class="card">
+    <h2>Log</h2>
+    <pre id="log" style="background:#111;color:#0f0;padding:12px;overflow:auto;border-radius:4px;height:200px"></pre>
+  </section>
 </main>
 <script>
 let poller;
@@ -81,6 +118,11 @@ function connect(){
   log('Base set to '+base);
   clearInterval(poller);
   poller=setInterval(()=>refreshState(base),2000);
+  refreshState(base);
+}
+
+function getCurrent(){
+  const base=document.getElementById('base').value.trim()||window.location.origin;
   refreshState(base);
 }
 
@@ -98,6 +140,17 @@ async function refreshState(base){
   }catch(e){
     document.getElementById('statusText').textContent='Error';
   }
+}
+
+function nudge(dir){
+  const base=document.getElementById('base').value.trim()||window.location.origin;
+  const motor=document.getElementById('motor').value;
+  const step=parseFloat(document.getElementById('step').value||'0');
+  if(!step) return;
+  const joints={};
+  joints[motor]=dir*step;
+  api(base,'POST','/v1/arm/move',{mode:'relative',joints,speed:60});
+  refreshState(base);
 }
 
 async function pose(name){
