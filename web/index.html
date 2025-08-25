@@ -15,7 +15,9 @@
     const e = React.createElement;
     function App(){
       const [apiKey, setApiKey] = useState('');
-      const [base, setBase] = useState(window.location.origin);
+      const defaultBase = window.location.origin.startsWith('http') ? '' : 'http://localhost:8000';
+      const [base, setBase] = useState(defaultBase);
+
       const [status, setStatus] = useState('Disconnected');
       const [positions, setPositions] = useState({});
       const [log, setLog] = useState('');
