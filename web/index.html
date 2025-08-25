@@ -17,7 +17,6 @@
       const [apiKey, setApiKey] = useState('');
       const defaultBase = window.location.origin.startsWith('http') ? '' : 'http://localhost:8000';
       const [base, setBase] = useState(defaultBase);
-
       const [status, setStatus] = useState('Disconnected');
       const [positions, setPositions] = useState({});
       const [log, setLog] = useState('');
