@@ -1,222 +1,139 @@
- <!doctype html>
- <html lang="en">
- <head>
--<meta charset="utf-8">
-+<meta charset="utf-8" />
-+<meta name="viewport" content="width=device-width,initial-scale=1" />
- <title>LEGO Arm Control</title>
--<link rel="preconnect" href="https://fonts.googleapis.com">
--<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
--<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
--<style>
--:root{--primary:#0a6ed1;--bg:#f5f6f7;--card:#fff;--text:#32363a}
--*{box-sizing:border-box}
--body{font-family:"Inter",Arial,sans-serif;margin:0;background:var(--bg);color:var(--text)}
--header{background:var(--primary);color:#fff;padding:16px 24px;font-size:20px;font-weight:600;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
--main{max-width:1000px;margin:24px auto;padding:0 24px 24px;display:grid;gap:24px}
--section{background:var(--card);padding:24px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.05)}
--section h2{margin-top:0;font-size:18px;border-bottom:1px solid #e5e7eb;padding-bottom:8px;margin-bottom:16px}
--label{display:block;margin-top:8px}
--input,button{padding:8px 12px;font-size:14px;margin-top:4px;border:1px solid #d1d5db;border-radius:4px}
--button{background:var(--primary);border:none;color:#fff;border-radius:4px;cursor:pointer;transition:background 0.2s;margin-right:8px}
--button:hover{background:#0859a6}
--button:disabled{background:#9ca3af}
--.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px}
--pre{background:#111;color:#0f0;padding:12px;overflow:auto;border-radius:4px;height:200px}
--#stateTable th{text-align:left;padding-right:8px}
--</style>
-+<script src="https://cdn.tailwindcss.com"></script>
-+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-+<script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
- </head>
--<body>
--<header>LEGO Arm Control</header>
--<main>
--<section id="auth" class="grid">
--<label>API Key <input type="password" id="apiKey"></label>
--<label>Base URL <input id="base" placeholder="http://localhost:8000"></label>
--<div style="align-self:end"><button onclick="connect()">Connect</button></div>
--</section>
--
--<section id="status">
--<h2>Status</h2>
--<div id="statusText">Not connected.</div>
--<table id="stateTable"></table>
--</section>
--
--<section>
--<h2>Poses</h2>
--<div class="grid">
--<button onclick="pose('home')">Home</button>
--<button onclick="pose('pick_left')">Pick Left</button>
--<button onclick="pose('pick_right')">Pick Right</button>
--<button onclick="pose('place_left')">Place Left</button>
--<button onclick="pose('place_right')">Place Right</button>
--</div>
--</section>
--
--<section>
--<h2>Custom Move</h2>
--<div class="grid">
--<label>Joint A <input id="jointA" type="number" value="0"></label>
--<label>Joint B <input id="jointB" type="number" value="0"></label>
--<label>Joint C <input id="jointC" type="number" value="0"></label>
--<label>Joint D <input id="jointD" type="number" value="0"></label>
--<label>Speed <input id="speed" type="number" value="60"></label>
--<div style="align-self:end"><button onclick="move()">Move</button></div>
--</div>
--</section>
--
--<section>
--<h2>Emergency</h2>
--<button onclick="stop()">Stop</button>
--</section>
--
--<section>
--<h2>Log</h2>
--<pre id="log"></pre>
--</section>
-+<body class="min-h-screen bg-gray-100 flex flex-col">
-+<header class="bg-blue-600 text-white text-center py-4 font-semibold shadow">LEGO Arm Control</header>
-+<main class="flex-1 flex items-center justify-center p-4">
-+  <div id="root" class="w-full"></div>
- </main>
--<script>
--let poller;
-+<script type="text/babel">
-+const { useState, useEffect } = React;
- 
--function connect(){
--  const base=document.getElementById('base').value.trim()||window.location.origin;
--  document.getElementById('base').value=base;
--  log('Base set to '+base);
--  clearInterval(poller);
--  poller=setInterval(()=>refreshState(base),2000);
--  refreshState(base);
--}
-+function App() {
-+  const [motor, setMotor] = useState('A');
-+  const [step, setStep] = useState(5);
-+  const [positions, setPositions] = useState({});
-+  const base = window.location.origin;
- 
--async function refreshState(base){
--  try{
--    const data=await api(base,'GET','/v1/arm/state');
--    document.getElementById('statusText').textContent='OK';
--    const t=document.getElementById('stateTable');
--    t.innerHTML='';
--    for(const [k,v] of Object.entries(data.abs_degrees)){
--      const row=document.createElement('tr');
--      row.innerHTML=`<th>${k}</th><td>${v.toFixed(1)}°</td>`;
--      t.appendChild(row);
--    }
--  }catch(e){
--    document.getElementById('statusText').textContent='Error';
--  }
--}
--
--async function pose(name){
--  const base=document.getElementById('base').value.trim()||window.location.origin;
--  await api(base,'POST','/v1/arm/pose',{name,speed:60});
--  refreshState(base);
--}
-+  const nudge = (dir) => {
-+    const s = parseFloat(step);
-+    if (!s) return;
-+    const sign = (dir === 'left' || dir === 'up') ? -1 : 1;
-+    const joints = {};
-+    joints[motor] = sign * s;
-+    api('/v1/arm/move', 'POST', { mode: 'relative', joints, speed: 60 });
-+    getCurrent();
-+  };
- 
--async function move(){
--  const base=document.getElementById('base').value.trim()||window.location.origin;
--  const joints={};
--  ['A','B','C','D'].forEach(j=>{
--    const val=parseFloat(document.getElementById('joint'+j).value);
--    if(val) joints[j]=val;
--  });
--  await api(base,'POST','/v1/arm/move',{mode:'relative',joints,speed:parseInt(document.getElementById('speed').value||'60')});
--  refreshState(base);
--}
-+  const getCurrent = () => {
-+    api('/v1/arm/state', 'GET')
-+      .then(data => setPositions(data.abs_degrees || {}))
-+      .catch(() => {});
-+  };
- 
--async function stop(){
--  const base=document.getElementById('base').value.trim()||window.location.origin;
--  await api(base,'POST','/v1/arm/stop',{reason:'ui stop'});
--}
-+  useEffect(() => { getCurrent(); }, []);
- 
--async function api(base,method,path,body){
--  const key=document.getElementById('apiKey').value.trim();
--  const headers={'content-type':'application/json','ngrok-skip-browser-warning':'1'};
--  if(key) headers['x-api-key']=key;
--  const res=await fetch(base+path,{method,headers,body:body?JSON.stringify(body):undefined});
--  const text=await res.text();
--  log(method+' '+path+' -> '+res.status);
--  if(res.ok){
--    try{return JSON.parse(text).data;}catch{return null;}
--  }else{
--    throw new Error(text);
-+  async function api(path, method, body) {
-+    const res = await fetch(base + path, {
-+      method,
-+      headers: { 'Content-Type': 'application/json' },
-+      body: body ? JSON.stringify(body) : undefined
-+    });
-+    if (!res.ok) throw new Error(await res.text());
-+    const text = await res.text();
-+    try { return JSON.parse(text).data; } catch { return null; }
-   }
--}
- 
--function log(msg){
--  const pre=document.getElementById('log');
--  pre.textContent+=msg+'\n';
--  pre.scrollTop=pre.scrollHeight;
-+  return (
-+    <div className="bg-white rounded-xl shadow w-full max-w-sm p-6">
-+      <img src="robot-arm.png" alt="Robot arm" className="mx-auto w-40 h-auto mb-6" />
-+      <div className="grid grid-cols-2 gap-4">
-+        <label className="text-sm font-medium">
-+          Motor
-+          <select value={motor} onChange={e => setMotor(e.target.value)} className="mt-1 w-full border rounded p-2">
-+            {['A','B','C','D'].map(m => <option key={m} value={m}>{m}</option>)}
-+          </select>
-+        </label>
-+        <label className="text-sm font-medium">
-+          Step (°)
-+          <input type="number" value={step} onChange={e => setStep(e.target.value)} className="mt-1 w-full border rounded p-2" />
-+        </label>
-+      </div>
-+      <div className="grid grid-cols-3 grid-rows-3 gap-3 mt-6 place-items-center">
-+        <button className="col-start-2 row-start-1 w-12 h-12 rounded-full bg-gray-200 hover:bg-gray-300 active:bg-gray-400 flex items-center justify-center text-xl" onClick={() => nudge('up')}>▲</button>
-+        <button className="col-start-1 row-start-2 w-12 h-12 rounded-full bg-gray-200 hover:bg-gray-300 active:bg-gray-400 flex items-center justify-center text-xl" onClick={() => nudge('left')}>◀</button>
-+        <button className="col-start-3 row-start-2 w-12 h-12 rounded-full bg-gray-200 hover:bg-gray-300 active:bg-gray-400 flex items-center justify-center text-xl" onClick={() => nudge('right')}>▶</button>
-+        <button className="col-start-2 row-start-3 w-12 h-12 rounded-full bg-gray-200 hover:bg-gray-300 active:bg-gray-400 flex items-center justify-center text-xl" onClick={() => nudge('down')}>▼</button>
-+      </div>
-+      <button className="mt-6 w-full bg-blue-600 text-white py-2 rounded" onClick={getCurrent}>Get Current Position</button>
-+      <dl className="mt-4 grid grid-cols-2 gap-y-1 text-sm">
-+        {Object.entries(positions).map(([k,v]) => (
-+          <React.Fragment key={k}>
-+            <dt>{k}</dt>
-+            <dd className="text-right">{v.toFixed(1)}°</dd>
-+          </React.Fragment>
-+        ))}
-+      </dl>
-+    </div>
-+  );
- }
- 
--connect();
-+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
- </script>
- </body>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>LEGO Arm Control</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+</head>
+<body class="bg-gray-100">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    function App(){
+      const [apiKey, setApiKey] = useState('');
+      const [base, setBase] = useState(window.location.origin);
+      const [status, setStatus] = useState('Disconnected');
+      const [positions, setPositions] = useState({});
+      const [log, setLog] = useState('');
+      const [motor, setMotor] = useState('A');
+      const [step, setStep] = useState(5);
+      const poller = useRef(null);
+
+      const addLog = msg => {
+        setLog(l => (l + msg + '\n').slice(-4000));
+      };
+
+      const api = async (method, path, body) => {
+        const headers = {'content-type':'application/json','ngrok-skip-browser-warning':'1'};
+        if(apiKey) headers['x-api-key']=apiKey;
+        const res = await fetch(base + path, {method, headers, body: body? JSON.stringify(body):undefined});
+        addLog(method+' '+path+' -> '+res.status);
+        if(!res.ok) throw new Error(await res.text());
+        const text = await res.text();
+        try{ return JSON.parse(text).data; }catch{return null;}
+      };
+
+      const getState = async () => {
+        try{
+          const data = await api('GET','/v1/arm/state');
+          setStatus('Connected');
+          setPositions(data.abs_degrees || {});
+        }catch(e){
+          setStatus('Error');
+        }
+      };
+
+      const connect = () => {
+        getState();
+        if(poller.current) clearInterval(poller.current);
+        poller.current = setInterval(getState, 2000);
+      };
+
+      const health = () => api('GET','/v1/health');
+      const inventory = () => api('GET','/v1/inventory');
+      const home = () => api('POST','/v1/arm/pose',{name:'home',speed:60});
+      const stop = () => api('POST','/v1/arm/stop',{reason:'ui stop'});
+      const nudge = dir => {
+        const s = parseFloat(step);
+        if(!s) return;
+        const sign = (dir==='left'||dir==='up')?-1:1;
+        const joints={}; joints[motor]=sign*s;
+        return api('POST','/v1/arm/move',{mode:'relative',joints,speed:60}).then(getState);
+      };
+
+      useEffect(()=>{connect(); return ()=>poller.current && clearInterval(poller.current);},[]);
+
+      return (
+        <div className="min-h-screen flex flex-col">
+          <header className="bg-blue-600 text-white">
+            <div className="max-w-5xl mx-auto p-4 flex flex-col items-center">
+              <div className="w-full flex justify-between mb-4">
+                <div className="px-4 py-1 rounded-full bg-white/20">{status}</div>
+                <div className="px-4 py-1 rounded-full bg-white/20">Motors {Object.keys(positions).length? 'OK':'--'}</div>
+              </div>
+              <img src="robot-arm.png" alt="Robot arm" className="h-40 object-contain" />
+              <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-2 w-full">
+                {Object.entries(positions).map(([k,v])=> (
+                  <div key={k} className="bg-white/20 rounded-full px-3 py-1 text-center text-sm">{k}: {v.toFixed(1)}°</div>
+                ))}
+              </div>
+            </div>
+          </header>
+          <main className="flex-1 bg-gray-50">
+            <div className="max-w-5xl mx-auto p-4 space-y-4">
+              <section className="bg-white rounded-xl shadow p-6">
+                <h2 className="text-lg font-semibold text-blue-600 mb-4">General Commands</h2>
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <label className="text-sm font-medium">API Key
+                    <input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)} className="mt-1 w-full border rounded p-2" />
+                  </label>
+                  <label className="text-sm font-medium">Base URL
+                    <input value={base} onChange={e=>setBase(e.target.value)} className="mt-1 w-full border rounded p-2" />
+                  </label>
+                </div>
+                <div className="flex flex-wrap gap-2 mt-4">
+                  <button onClick={connect} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Connect</button>
+                  <button onClick={health} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Health</button>
+                  <button onClick={inventory} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Inventory</button>
+                  <button onClick={home} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Home</button>
+                  <button onClick={stop} className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">Stop</button>
+                </div>
+              </section>
+              <section className="bg-white rounded-xl shadow p-6">
+                <h2 className="text-lg font-semibold text-blue-600 mb-4">Console</h2>
+                <pre className="bg-black text-green-400 rounded p-3 h-40 overflow-auto whitespace-pre-wrap">{log}</pre>
+              </section>
+              <section className="bg-white rounded-xl shadow p-6">
+                <h2 className="text-lg font-semibold text-blue-600 mb-4">Nudge Controls</h2>
+                <div className="flex flex-wrap gap-4 mb-4">
+                  <label className="text-sm font-medium">Motor
+                    <select value={motor} onChange={e=>setMotor(e.target.value)} className="mt-1 border rounded p-2">
+                      {['A','B','C','D'].map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </label>
+                  <label className="text-sm font-medium">Step (°)
+                    <input type="number" value={step} onChange={e=>setStep(e.target.value)} className="mt-1 w-24 border rounded p-2" />
+                  </label>
+                </div>
+                <div className="grid grid-cols-3 grid-rows-3 gap-3 w-32 mx-auto">
+                  <button onClick={()=>nudge('up')} className="col-start-2 row-start-1 w-10 h-10 rounded-full bg-gray-200 hover:bg-gray-300 active:bg-gray-400 flex items-center justify-center">▲</button>
+                  <button onClick={()=>nudge('left')} className="col-start-1 row-start-2 w-10 h-10 rounded-full bg-gray-200 hover:bg-gray-300 active:bg-gray-400 flex items-center justify-center">◀</button>
+                  <button onClick={()=>nudge('right')} className="col-start-3 row-start-2 w-10 h-10 rounded-full bg-gray-200 hover:bg-gray-300 active:bg-gray-400 flex items-center justify-center">▶</button>
+                  <button onClick={()=>nudge('down')} className="col-start-2 row-start-3 w-10 h-10 rounded-full bg-gray-200 hover:bg-gray-300 active:bg-gray-400 flex items-center justify-center">▼</button>
+                </div>
+              </section>
+            </div>
+          </main>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
 </html>
