@@ -33,7 +33,7 @@ sap.ui.define([
        ====================== */
     _loadConfig: function () {
       var defaults = {
-        baseUrl: "http://legopi.local:5000",
+        baseUrl: "http://legopi.local:8000",
         authMode: "none",     // none | basic | bearer | x-api-key
         username: "",
         password: "",
@@ -189,7 +189,7 @@ _log: function (msg, obj) {
 
       var cfg = Object.assign({}, this._cfg);
 
-      var inpBase = new Input({ width: "100%", value: cfg.baseUrl, placeholder: "http://legopi.local:5000" });
+      var inpBase = new Input({ width: "100%", value: cfg.baseUrl, placeholder: "http://legopi.local:8000" });
       var selAuth = new Select({
         width: "100%",
         selectedKey: cfg.authMode || "none",

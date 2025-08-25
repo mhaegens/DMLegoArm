@@ -21,5 +21,3 @@ Calling an endpoint executes the corresponding sequence of arm movements.
 All logic lives on the device so DM only needs to trigger the appropriate
 endpoint. This repo ships with example processes `pick-assembly-quality` and
 `pick-quality-assembly` that move parts between assembly and quality stations.
-
- main
