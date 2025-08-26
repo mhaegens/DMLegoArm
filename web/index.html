@@ -1,4 +1,4 @@
-<!-- Robot Arm Control v3.5 -->
+<!-- Robot Arm Control v4.0 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -7,201 +7,663 @@
   <title>Lego Arm Control</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            brand: { 25:"#f3f9ff",50:"#eaf3ff",100:"#d6e9ff",200:"#b6d9ff",300:"#8cc5ff",400:"#56aaff",500:"#1f90ff",600:"#1477db",700:"#0f5fb1",800:"#0c4d8f",900:"#0a3e75" }
-          }
-        }
-      }
-    }
+    tailwind.config = { theme: { extend: { colors: {
+      brand: { 25:"#f3f9ff",50:"#eaf3ff",100:"#d6e9ff",200:"#b6d9ff",300:"#8cc5ff",400:"#56aaff",500:"#1f90ff",600:"#1477db",700:"#0f5fb1",800:"#0c4d8f",900:"#0a3e75" }
+    }}}};
   </script>
   <style>
     body { background: #f6f9fc; }
     .glass { background: rgba(255,255,255,0.18); border: 1px solid rgba(255,255,255,0.25); box-shadow: 0 8px 24px rgba(0,0,0,0.10); backdrop-filter: saturate(160%) blur(8px); }
     .soft-shadow { box-shadow: 0 14px 32px -8px rgba(2,132,199,.35); }
     .console-area { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .btn { @apply px-3 py-2 rounded-xl; }
   </style>
 </head>
 <body class="antialiased text-slate-800">
   <div id="root"></div>
 
+  <!-- React (dev builds for ease of inline Babel editing; swap to production for field use) -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
+  <!-- Optional QR scanner CDN (used if available) -->
+  <script src="https://unpkg.com/qr-scanner@1.4.2/qr-scanner.umd.min.js"></script>
 
   <script type="text/babel">
-    const {useEffect,useRef,useState} = React;
-    const Icon=({name,className="w-5 h-5"})=>({menu:<svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"/></svg>,copy:<svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2"/><path strokeWidth="2" d="M5 15V5a2 2 0 012-2h10"/></svg>,trash:<svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>}[name]||<span/>);
+    const {useEffect,useRef,useState,useMemo} = React;
+
+    // ---------- Utils ----------
+    const now = () => Date.now();
+    const fmtMs = ms => (ms<1000? ms+'ms' : (ms/1000).toFixed(2)+'s');
+    const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
+    const join = (a,b)=>a.replace(/\\/+$/,'') + '/' + b.replace(/^\\/+/, '');
+    const MOTOR_ORDER = ["A","B","C","D","E","F"]; // extendable
 
     function useLocalStorage(key, initial){
-      const [v,setV]=useState(()=>{try{return JSON.parse(localStorage.getItem(key))??initial;}catch{return initial;}});
-      useEffect(()=>{localStorage.setItem(key,JSON.stringify(v));},[key,v]);
+      const [v,setV]=useState(()=>{ try { return JSON.parse(localStorage.getItem(key)) ?? initial; } catch { return initial; } });
+      useEffect(()=>{ localStorage.setItem(key, JSON.stringify(v)); }, [key, v]);
       return [v,setV];
     }
-    const defaultMotors=['A','B','C','D'].map((name,i)=>({id:i+1,name,pos:0}));
 
+    function percentile(arr,p){
+      if(arr.length===0) return 0;
+      const s=[...arr].sort((a,b)=>a-b);
+      const idx = Math.min(s.length-1, Math.max(0, Math.floor((p/100)*(s.length-1))));
+      return s[idx];
+    }
+
+    // ---------- Small components ----------
+    const Icon = ({name, className="w-5 h-5"}) => ({
+      menu: <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"/></svg>,
+      copy: <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2"/><path strokeWidth="2" d="M5 15V5a2 2 0 012-2h10"/></svg>,
+      trash:<svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>,
+      play: <svg className={className} viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>,
+      pause:<svg className={className} viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg>,
+      plus: <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" d="M12 5v14M5 12h14"/></svg>,
+      cam:  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="5" width="18" height="14" rx="2" strokeWidth="2"/><circle cx="12" cy="12" r="3" strokeWidth="2"/></svg>,
+      dl:   <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg>,
+      tune: <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" d="M4 6h10M14 6v10M4 18h16M8 18V8M18 6v8"/></svg>,
+      target:<svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="8" strokeWidth="2"/><circle cx="12" cy="12" r="2" strokeWidth="2"/></svg>,
+    }[name] || <span/>);
+
+    const MotorPill = ({children}) => (
+      <div className="glass inline-flex items-center gap-1 px-2 py-1 rounded-full text-white text-[11px]">{children}</div>
+    );
+
+    // Sparkline (SVG) for a small time series
+    const Sparkline = ({data, width=80, height=20, padding=2}) => {
+      if(!data || data.length<2) return <svg width={width} height={height}></svg>;
+      const min = Math.min(...data), max = Math.max(...data);
+      const range = (max-min) || 1;
+      const stepX = (width - 2*padding) / (data.length - 1);
+      const pts = data.map((v,i)=>[padding + i*stepX, height - padding - ((v-min)/range)*(height-2*padding)]);
+      const d = pts.map((p,i)=> (i===0? 'M':'L') + p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+      return <svg width={width} height={height}><path d={d} fill="none" stroke="currentColor" strokeWidth="1"/></svg>;
+    };
+
+    // Radial delta gauge (simple arc)
+    const DeltaGauge = ({delta, tol=1, size=68}) => {
+      // delta in degrees; green if within tol
+      const r = (size/2)-6, cx=size/2, cy=size/2;
+      const clamped = clamp(Math.abs(delta), 0, 90);
+      const angle = (clamped/90)*Math.PI; // 0..pi
+      const x = cx + r*Math.cos(Math.PI - angle);
+      const y = cy + r*Math.sin(Math.PI - angle);
+      const large = 0;
+      const path = `M ${cx-r} ${cy} A ${r} ${r} 0 ${large} 1 ${x} ${y}`;
+      const ok = Math.abs(delta) <= tol;
+      return (
+        <svg width={size} height={size} className="text-slate-300">
+          <circle cx={cx} cy={cy} r={r} stroke="currentColor" strokeWidth="6" fill="none" opacity="0.25"/>
+          <path d={path} stroke={ok?'#10b981':'#ef4444'} strokeWidth="6" fill="none" />
+          <text x="50%" y="48%" dominantBaseline="middle" textAnchor="middle" fontSize="14" fill="#0f172a">{delta.toFixed(0)}°</text>
+          <text x="50%" y="66%" dominantBaseline="middle" textAnchor="middle" fontSize="10" fill="#64748b">Δ</text>
+        </svg>
+      );
+    };
+
+    // ---------- Main App ----------
     function App(){
-      const [baseUrl,setBaseUrl]=useLocalStorage("ra.baseUrl","");
-      const [apiKey,setApiKey]=useLocalStorage("ra.apiKey","");
+      // Fleet
+      const [fleet, setFleet] = useLocalStorage("ra.fleet", [
+        { id: 'default', name: 'Robot 1', baseUrl: '', apiKey: '' }
+      ]);
+      const [currentId, setCurrentId] = useLocalStorage("ra.fleet.current", 'default');
+
+      // Derived current robot
+      const current = useMemo(()=>fleet.find(f=>f.id===currentId) || fleet[0], [fleet, currentId]);
+      const [baseUrl, setBaseUrl] = useState(current?.baseUrl || '');
+      const [apiKey, setApiKey] = useState(current?.apiKey || '');
+
+      // Core state
       const [connected,setConnected]=useState(false);
-      const [motors,setMotors]=useLocalStorage("ra.motors",defaultMotors);
+      const [motors,setMotors]=useLocalStorage("ra.motors",["A","B","C","D"].map((n,i)=>({id:i+1,name=n,pos:0})));
       const [logs,setLogs]=useLocalStorage("ra.logs",[]);
-      const [step,setStep]=useLocalStorage("ra.step",5);
-      const [poseName,setPoseName]=useState("");
+      const [inventory,setInventory]=useState(null);
+      const [inventoryOpen,setInventoryOpen]=useState(false);
+      const [adminOpen,setAdminOpen]=useState(false);
+      const [seqOpen,setSeqOpen]=useState(false);
+      const [qrOpen,setQrOpen]=useState(false);
+
+      // Ring buffer for analytics (2 minutes)
+      const RING_MS = 120000;
+      const [ring,setRing]=useLocalStorage("ra.ring", []); // [{t, angles:{A:..}}]
+
+      // Soft limits
+      const [limits,setLimits]=useLocalStorage("ra.limits", {A:{min:-180,max:180},B:{min:-180,max:180},C:{min:-180,max:180},D:{min:-180,max:180}});
+
+      // Teach poses (client-side)
+      const [taught,setTaught]=useLocalStorage("ra.taught", {}); // {poseName:{A:..}}
+      const [targetPose,setTargetPose]=useLocalStorage("ra.targetPose", null); // poseName
+
+      // Sequences
+      const [sequences,setSequences]=useLocalStorage("ra.sequences", []); // [{id,name,steps:[...]}]
+      const [runner,setRunner]=useState({running:false, idx:0, startedAt:0, paused:false});
+
+      // Offline queue
+      const [offlineQueue,setOfflineQueue]=useLocalStorage("ra.offlineQueue", []); // [{method,path,body,ts}]
+
+      // Jog Modal
+      const [jogMotor,setJogMotor]=useState(null); // {id,name,pos}
+      const [jogEnable,setJogEnable]=useState(false);
+      const repeatRef = useRef(null);
+
+      // Tilt-to-nudge
+      const [tiltEnabled,setTiltEnabled]=useState(false);
+      const [tiltMotor,setTiltMotor]=useState("A");
+      const [tiltGain,setTiltGain]=useState(0.2); // deg per beta degree
+
+      // Custom
       const [customPath,setCustomPath]=useState("/v1/arm/move");
       const [customMethod,setCustomMethod]=useState("POST");
       const [customBody,setCustomBody]=useState('{"mode":"relative","joints":{"A":10},"speed":40}');
-      const [adminOpen,setAdminOpen]=useState(false);
-      const [inventory,setInventory]=useState(null);
-      const [inventoryOpen,setInventoryOpen]=useState(false);
-      const logRef=useRef(null);
-      useEffect(()=>{if(logRef.current)logRef.current.scrollTop=logRef.current.scrollHeight;},[logs]);
+      const [step,setStep]=useLocalStorage("ra.step",5);
 
-      function addLog(e){const ts=new Date().toLocaleTimeString();setLogs(l=>[...l.slice(-999),{ts,...e}]);}
-      function headers(){const h={"Content-Type":"application/json","ngrok-skip-browser-warning":"1"};if(apiKey)h["x-api-key"]=apiKey;return h;}
-      async function api(method,path,body){
-        if(!baseUrl){addLog({level:"err",text:"Base URL not set"});throw new Error("Base URL not set");}
-        const url=baseUrl.replace(/\/$/,"")+path;
-        const opts={method,headers:headers()};
-        if(body!==undefined)opts.body=JSON.stringify(body);
-        addLog({level:"req",text:method+" "+url,body});
+      const polling = useRef(false);
+      const alive = useRef(true);
+
+      useEffect(()=>()=>{ alive.current=false; },[]);
+
+      // Persist baseUrl/apiKey into fleet on change of currentId
+      useEffect(()=>{
+        setFleet(fs => fs.map(f => f.id===currentId ? {...f, baseUrl, apiKey} : f));
+      }, [baseUrl, apiKey, currentId, setFleet]);
+
+      // --------- Logging helpers ---------
+      const addLog = (e) => {
+        const ts = new Date().toLocaleTimeString();
+        setLogs(l=>[...l.slice(-999), {ts, ...e}]);
+      };
+
+      const headers = () => {
+        const h={"Content-Type":"application/json","ngrok-skip-browser-warning":"1"};
+        if(apiKey) h["x-api-key"]=apiKey;
+        return h;
+      };
+
+      async function api(method, path, body, {timeoutMs=8000, queueIfOffline=false}={}){
+        if(!baseUrl){ addLog({level:"err",text:"Base URL not set"}); throw new Error("Base URL not set"); }
+        const url = join(baseUrl, path);
+        if(queueIfOffline && !connected){
+          const item={method,path,body,ts:now()}; setOfflineQueue(q=>[...q,item]);
+          addLog({level:"ok",text:"Queued (offline): "+method+" "+url, body});
+          return null;
+        }
+        const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(), timeoutMs);
+        const opts={method, headers:headers(), signal:ctrl.signal};
+        if(body!==undefined) opts.body=JSON.stringify(body);
+        addLog({level:"req",text:`${method} ${url}`,body});
         const t0=performance.now();
         try{
-          const res=await fetch(url,opts);
+          const res=await fetch(url, opts);
           const elapsed=Math.round(performance.now()-t0);
-          const txt=await res.text();
-          let data=null;try{data=txt?JSON.parse(txt):null;}catch{}
-          addLog({level:res.ok?"ok":"err",text:res.status+" "+res.statusText+" ("+elapsed+"ms)",body:data??txt});
-          if(!res.ok)throw new Error("HTTP "+res.status);
-          return data?.data??data;
-        }catch(e){addLog({level:"err",text:String(e.message||e)});throw e;}
+          const txt=await res.text(); let data=null; try{ data = txt ? JSON.parse(txt) : null; } catch {}
+          addLog({level:res.ok?"ok":"err", text:`${res.status} ${res.statusText} (${elapsed}ms)`, body:data??txt, ms:elapsed});
+          if(!res.ok) throw new Error("HTTP "+res.status);
+          return data?.data ?? data;
+        } finally { clearTimeout(t); }
       }
-      async function checkHealth(){try{await api("GET","/v1/health");setConnected(true);}catch{setConnected(false);}}
-      async function updatePositions(){const s=await api("GET","/v1/arm/state").catch(()=>null);if(s?.abs_degrees){const mapped=Object.entries(s.abs_degrees).map(([k,v],i)=>({id:i+1,name:k,pos:Math.round(v)}));setMotors(mapped);}}
-      async function loadInventory(show=false){const inv=await api("GET","/v1/inventory").catch(()=>null);await updatePositions();if(show && inv){setInventory(inv);setInventoryOpen(true);}return inv;}
-      async function showInventory(){await loadInventory(true);}
-      async function sendPose(n){if(!n)return;await api("POST","/v1/arm/pose",{name:n,speed:60});await updatePositions();}
-      async function home(){await sendPose("home");}
-      async function stop(){await api("POST","/v1/arm/stop",{reason:"ui stop"}).catch(()=>{});}
-      async function refreshPositions(){await updatePositions();}
-      async function nudge(m,d){const name=m.name||("M"+m.id);const joints={};joints[name]=d;await api("POST","/v1/arm/move",{mode:"relative",joints,speed:60}).catch(()=>{});setMotors(p=>p.map(x=>x.id===m.id?{...x,pos:x.pos+d}:x));}
-      async function runCustom(){let body;try{body=customBody?JSON.parse(customBody):undefined;}catch{alert("Invalid JSON body");return;}await api(customMethod,customPath,body);}
 
-      useEffect(()=>{checkHealth();const id=setInterval(checkHealth,15000);return()=>clearInterval(id);},[baseUrl,apiKey]);
-      useEffect(()=>{if(!baseUrl)return;updatePositions();const id=setInterval(updatePositions,5000);return()=>clearInterval(id);},[baseUrl,apiKey]);
+      // Execute queued commands (explicit)
+      async function runQueue(){
+        if(!connected || offlineQueue.length===0) return;
+        for(const item of offlineQueue){
+          await api(item.method, item.path, item.body).catch(()=>{});
+        }
+        setOfflineQueue([]);
+      }
 
-      // Compact pill variants
-      const MotorPill=({children})=>(<div className="glass inline-flex items-center gap-1 px-2 py-1 rounded-full text-white text-[11px]">{children}</div>);
+      // Health & state polling
+      async function checkHealth(){
+        try{ await api("GET","/v1/health"); setConnected(true); }
+        catch{ setConnected(false); }
+      }
 
+      async function updatePositions(){
+        if(polling.current) return;
+        polling.current = true;
+        try{
+          const s = await api("GET","/v1/arm/state").catch(()=>null);
+          if(s?.abs_degrees){
+            const ordered = Object.entries(s.abs_degrees)
+              .map(([k,v])=>({name:k,pos:+v}))
+              .sort((a,b)=>MOTOR_ORDER.indexOf(a.name)-MOTOR_ORDER.indexOf(b.name))
+              .map((m,i)=>({id:i+1,...m}));
+            setMotors(ordered);
+
+            // Update ring buffer
+            const sample = { t: now(), angles: Object.fromEntries(ordered.map(m=>[m.name, m.pos])) };
+            setRing(prev => {
+              const arr = [...prev, sample];
+              const cutoff = now() - RING_MS;
+              return arr.filter(s => s.t >= cutoff);
+            });
+          }
+        } finally { polling.current=false; }
+      }
+
+      async function loadInventory(show=false){
+        const inv = await api("GET","/v1/inventory").catch(()=>null);
+        if(show && inv){ setInventory(inv); setInventoryOpen(true); }
+        return inv;
+      }
+
+      async function sendPose(name, speed=60){
+        if(!name) return;
+        await api("POST","/v1/arm/pose", {name, speed}, {queueIfOffline:true});
+      }
+
+      async function stop(){ await api("POST","/v1/arm/stop",{reason:"ui stop"},{queueIfOffline:true}).catch(()=>{}); }
+
+      async function nudge(name, delta, speed=60){
+        // Soft-limit check
+        const cur = motors.find(m=>m.name===name)?.pos ?? 0;
+        const lim = limits[name] || {min:-9999,max:9999};
+        const next = cur + delta;
+        if(next < lim.min || next > lim.max){
+          addLog({level:"err", text:`Soft limit ${name}: ${next.toFixed(1)}° out of [${lim.min}, ${lim.max}]`});
+          return;
+        }
+        const joints={}; joints[name]=delta;
+        await api("POST","/v1/arm/move",{mode:"relative",joints,speed},{queueIfOffline:true}).catch(()=>{});
+        // optimistic UI
+        setMotors(p=>p.map(x=>x.name===name?{...x,pos:x.pos+delta}:x));
+      }
+
+      async function refresh(){ await updatePositions(); }
+
+      // Polling intervals & tab visibility
+      useEffect(()=>{ checkHealth(); const id=setInterval(checkHealth,15000); return ()=>clearInterval(id); }, [baseUrl, apiKey]);
+      useEffect(()=>{
+        if(!baseUrl) return;
+        updatePositions();
+        const id=setInterval(()=>{ if(!document.hidden) updatePositions(); }, 5000);
+        const onVis = () => { if(!document.hidden) updatePositions(); };
+        document.addEventListener("visibilitychange", onVis);
+        return ()=>{ clearInterval(id); document.removeEventListener("visibilitychange", onVis); };
+      }, [baseUrl, apiKey]);
+
+      // ---------- Analytics from ring/logs ----------
+      const series = useMemo(()=>{
+        const names = Object.keys(motors.reduce((acc,m)=> (acc[m.name]=1, acc), {}));
+        const byName = Object.fromEntries(names.map(n=>[n, []]));
+        ring.forEach(s=>{ names.forEach(n=> byName[n].push({t:s.t, v: s.angles[n] ?? 0})) });
+        return byName;
+      }, [ring, motors]);
+
+      const rates = useMemo(()=>{
+        const r={};
+        for(const [n,arr] of Object.entries(series)){
+          if(arr.length<2){ r[n]=0; continue; }
+          const a=arr[arr.length-2], b=arr[arr.length-1];
+          const dt=(b.t-a.t)/1000; const dv=b.v-a.v; r[n]= dt? (dv/dt) : 0;
+        }
+        return r;
+      }, [series]);
+
+      const latencies = useMemo(()=> logs.filter(l=>typeof l.ms==='number').map(l=>l.ms), [logs]);
+      const reliab = useMemo(()=>{
+        const ok = logs.filter(l=>l.level==='ok').length;
+        const err = logs.filter(l=>l.level==='err').length;
+        const total = ok+err || 1;
+        return {
+          successRate: (ok/total)*100,
+          p50: percentile(latencies, 50),
+          p95: percentile(latencies, 95),
+        };
+      }, [logs, latencies]);
+
+      // Heatmap bins
+      const bins = useMemo(()=>{
+        const B=18; // 10° bins over 180° range (adjusted to observed)
+        const out={};
+        for(const n of Object.keys(series)){
+          const arr=new Array(B).fill(0);
+          const values = series[n].map(x=>x.v);
+          if(values.length){
+            const min=Math.min(...values), max=Math.max(...values);
+            for(const v of values){
+              const idx = clamp(Math.floor(((v-min)/(max-min||1)) * (B-1)), 0, B-1);
+              arr[idx]++;
+            }
+          }
+          out[n]=arr;
+        }
+        return out;
+      }, [series]);
+
+      // Target pose angles (from taught pose or "captured target")
+      const targetAngles = useMemo(()=>{
+        if(targetPose && taught[targetPose]) return taught[targetPose];
+        return null;
+      }, [targetPose, taught]);
+
+      // ---------- Jog modal logic (long-press + two-hand enable) ----------
+      function startRepeat(name, delta){
+        if(!jogEnable) return;
+        if(repeatRef.current) return;
+        nudge(name, delta);
+        repeatRef.current = setInterval(()=> nudge(name, delta), 220);
+      }
+      function stopRepeat(){ if(repeatRef.current){ clearInterval(repeatRef.current); repeatRef.current=null; } }
+
+      // ---------- Sequence runner ----------
+      async function runSequence(seq){
+        setRunner({running:true, idx:0, startedAt:now(), paused:false});
+        for(let i=0;i<seq.steps.length;i++){
+          if(!alive.current) break;
+          if(runner.paused){ await new Promise(res=>{ const iv=setInterval(()=>{ if(!runner.paused){ clearInterval(iv); res(); } }, 200); }); }
+          const step=seq.steps[i];
+          if(step.type==='pose'){ await sendPose(step.name, step.speed||60); }
+          if(step.type==='move'){ await api("POST","/v1/arm/move",{mode:"relative", joints: step.joints, speed: step.speed||60}).catch(()=>{}); }
+          if(step.type==='wait'){ await new Promise(res=>setTimeout(res, step.ms||500)); }
+          if(step.type==='stop'){ await stop(); }
+          setRunner(r=>({...r, idx:i+1}));
+        }
+        setRunner(r=>({...r, running:false}));
+      }
+
+      function dryRun(seq){
+        // Estimate simple duration: waits + (moves: ms per degree) + pose fixed ms
+        let ms=0;
+        for(const s of seq.steps){
+          if(s.type==='wait') ms += s.ms||500;
+          if(s.type==='move'){
+            const total = Object.values(s.joints||{}).reduce((a,b)=>a+Math.abs(b),0);
+            ms += (total * (1000/(s.speed||60))); // naive
+          }
+          if(s.type==='pose') ms += 700; // naive assume
+        }
+        alert("Estimated duration: "+fmtMs(ms));
+      }
+
+      // ---------- Blend-to-pose ----------
+      function blendToPose(percent, speed=60){
+        if(!targetAngles) return;
+        const joints={};
+        for(const m of motors){
+          const tgt = targetAngles[m.name];
+          if(typeof tgt !== 'number') continue;
+          const delta = (tgt - m.pos) * (percent/100);
+          if(Math.abs(delta)>=0.5) joints[m.name]=Math.round(delta);
+        }
+        if(Object.keys(joints).length){
+          api("POST","/v1/arm/move",{mode:"relative", joints, speed}).catch(()=>{});
+        }
+      }
+
+      // ---------- Speed vs Accuracy tuner ----------
+      async function runTuner({joint="A", amplitude=5, speeds=[20,40,60,80], settleMs=350}){
+        const results=[];
+        for(const sp of speeds){
+          const before = motors.find(m=>m.name===joint)?.pos ?? 0;
+          await nudge(joint, amplitude, sp);
+          await new Promise(res=>setTimeout(res, settleMs));
+          await refresh();
+          const peak = motors.find(m=>m.name===joint)?.pos ?? before;
+          await nudge(joint, -amplitude, sp);
+          await new Promise(res=>setTimeout(res, settleMs));
+          await refresh();
+          const after = motors.find(m=>m.name===joint)?.pos ?? before;
+          const forwardErr = Math.abs((before+amplitude) - peak);
+          const returnErr  = Math.abs(before - after);
+          results.push({speed:sp, forwardErr, returnErr});
+        }
+        return results;
+      }
+
+      // ---------- Diagnostics export ----------
+      function exportDiagnostics(){
+        const blob = new Blob([JSON.stringify({
+          ts: new Date().toISOString(),
+          fleet, currentId, baseUrl,
+          inventory,
+          motors,
+          ring,
+          limits,
+          taught,
+          sequences,
+          logs: logs.slice(-200),
+        }, null, 2)], {type:"application/json"});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href=url; a.download = 'robot_diagnostics.json';
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      // ---------- QR Bootstrap ----------
+      function parseQr(text){
+        // Accept JSON or key=value&key2=value2
+        try {
+          const j = JSON.parse(text);
+          if(j.baseUrl) setBaseUrl(j.baseUrl);
+          if(j.apiKey) setApiKey(j.apiKey);
+          return;
+        } catch {}
+        const params = new URLSearchParams(text);
+        if(params.get('baseUrl')) setBaseUrl(params.get('baseUrl'));
+        if(params.get('apiKey')) setApiKey(params.get('apiKey'));
+      }
+
+      // ---------- Tilt-to-nudge ----------
+      useEffect(()=>{
+        if(!tiltEnabled) return;
+        function onOrient(e){
+          // Use beta (front-back tilt) -> delta on selected motor
+          const beta = e.beta || 0; // -180..180
+          const delta = clamp(beta * tiltGain, -2, 2); // small deltas
+          if(Math.abs(delta) > 0.2) nudge(tiltMotor, Math.sign(delta)); // 1 deg step
+        }
+        window.addEventListener('deviceorientation', onOrient);
+        return ()=> window.removeEventListener('deviceorientation', onOrient);
+      }, [tiltEnabled, tiltMotor, tiltGain, motors]);
+
+      // ---------- UI ----------
+      const StatusPill = () => (
+        <div className={"inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white text-slate-800 shadow-sm ring-1 " + (connected ? 'ring-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' : 'ring-slate-200')}>
+          <span className={"w-2.5 h-2.5 rounded-full " + (connected ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]' : 'bg-slate-300')}></span>
+          <span className="font-semibold">{connected ? "Connected" : "Offline"}</span>
+        </div>
+      );
+
+      // ----- Render -----
       return (
         <div className="min-h-screen relative">
           {/* Header */}
           <header className="relative bg-gradient-to-b from-brand-600 to-brand-700 text-white soft-shadow overflow-visible">
             <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-4">
-              {/* Top bar: title left, admin right */}
-              <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-semibold tracking-tight drop-shadow-sm">Lego Arm Control</h1>
-                <button className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/30 text-white flex items-center gap-2" onClick={()=>setAdminOpen(true)}>
-                  <Icon name="menu" /><span>Admin</span>
-                </button>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-3">
+                  <h1 className="text-2xl font-semibold tracking-tight drop-shadow-sm">Lego Arm Control</h1>
+                  {/* Fleet switcher */}
+                  <select className="px-2 py-1 rounded-lg bg-white/10 border border-white/30" value={currentId} onChange={e=>setCurrentId(e.target.value)}>
+                    {fleet.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+                  </select>
+                  <button className="px-2 py-1 rounded-lg bg-white/10 border border-white/30" onClick={()=>{
+                    const name=prompt("Robot name?"); if(!name) return;
+                    const id='r'+Math.random().toString(36).slice(2,7);
+                    setFleet([...fleet, {id, name, baseUrl:'', apiKey:''}]);
+                    setCurrentId(id);
+                  }}>+ Add</button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/30 text-white flex items-center gap-2" onClick={()=>setQrOpen(true)} title="Scan QR for config"><Icon name="cam"/>QR</button>
+                  <button className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/30 text-white flex items-center gap-2" onClick={()=>setAdminOpen(true)} aria-label="Open admin settings"><Icon name="menu" /><span>Admin</span></button>
+                </div>
               </div>
             </div>
 
-            {/* Hero + right-side stacked motor pills with overlap */}
+            {/* Hero & stacked motor pills */}
             <div className="relative max-w-6xl mx-auto px-4 sm:px-6 h-[18rem] sm:h-[22rem]">
-              <img src="robot-arm.png" alt="Robot Arm"
-                   className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-[20%] pointer-events-none select-none max-h-[20rem] sm:max-h-[24rem] drop-shadow-[0_16px_36px_rgba(31,144,255,0.55)]" />
-              {/* Stacked M1..M4 */}
+              <img src="robot-arm.png" alt="Robot Arm" className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-[20%] pointer-events-none select-none max-h-[20rem] sm:max-h-[24rem] drop-shadow-[0_16px_36px_rgba(31,144,255,0.55)]" />
               <div className="absolute right-4 sm:right-6 top-1/2 -translate-y-1/2 flex flex-col gap-2 items-end">
                 {motors.map(m => (
-                  <MotorPill key={m.id}><span className="font-semibold">{m.name}</span><span className="opacity-90 ml-0.5">{m.pos}&deg;</span></MotorPill>
+                  <MotorPill key={m.id}>
+                    <span className="font-semibold">{m.name}</span>
+                    <span className="opacity-90 ml-0.5">{Math.round(m.pos)}°</span>
+                    <button className="ml-1 px-1 py-0.5 rounded bg-white/20 hover:bg-white/30" title="Jog" onClick={()=>setJogMotor(m)}>J</button>
+                  </MotorPill>
                 ))}
               </div>
             </div>
           </header>
 
-          {/* Overall status pill: light background + dark text for legibility */}
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 mt-6 relative z-10">
-            <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white text-slate-800 shadow-sm ring-1 ${connected ? 'ring-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' : 'ring-slate-200'}`}>
-              <span className={`w-2.5 h-2.5 rounded-full ${connected ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]' : 'bg-slate-300'}`}></span>
-              <span className="font-semibold">{connected ? "Connected" : "Offline"}</span>
-            </div>
+          {/* Status pill */}
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 mt-6 relative z-10 flex items-center gap-3">
+            <StatusPill />
+            {offlineQueue.length>0 && connected && (
+              <button className="px-3 py-1.5 rounded-lg bg-amber-100 text-amber-900 border border-amber-300" onClick={runQueue}>
+                Execute queued ({offlineQueue.length})
+              </button>
+            )}
           </div>
 
-          {/* Main content */}
-          <main className="max-w-6xl mx-auto px-4 sm:px-6 pt-12 sm:pt-16 pb-16">
-            {/* General commands */}
+          {/* Main */}
+          <main className="max-w-6xl mx-auto px-4 sm:px-6 pt-12 sm:pt-16 pb-20 space-y-6">
+            {/* Quick actions */}
             <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6">
               <div className="flex items-center justify-between">
-                <h2 className="text-slate-800 font-semibold">General commands</h2>
+                <h2 className="text-slate-800 font-semibold">General</h2>
                 <div className="text-xs text-slate-500">Quick actions</div>
               </div>
-              <div className="mt-4 grid sm:grid-cols-4 gap-3">
-                <button className="px-3 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white" onClick={home}>Home</button>
-                <button className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={stop}>Stop</button>
-                <button className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={checkHealth}>Health</button>
-                <button className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={showInventory}>Inventory</button>
+              <div className="mt-4 grid sm:grid-cols-5 gap-3">
+                <button className="px-3 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white" onClick={()=>sendPose("home")}>Home</button>
+                <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={stop}>Stop</button>
+                <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={()=>checkHealth()}>Health</button>
+                <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={()=>loadInventory(true)}>Inventory</button>
+                <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={()=>refresh()}>Refresh positions</button>
               </div>
-
-              <div className="mt-6 grid md:grid-cols-3 gap-4">
-                <div className="md:col-span-2">
-                  <div className="grid sm:grid-cols-3 gap-3">
-                    <div className="sm:col-span-2">
-                      <label className="block text-xs text-slate-600 mb-1">Pose name</label>
-                      <input className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 shadow-inner" placeholder="e.g. pick_left" value={poseName} onChange={e=>setPoseName(e.target.value)} />
-                    </div>
-                    <div className="flex items-end">
-                      <button className="w-full px-3 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white" onClick={()=>sendPose(poseName)}>Go to pose</button>
-                    </div>
-                  </div>
-                </div>
-                <div className="border border-dashed rounded-xl p-3">
-                  <div className="text-xs text-slate-600 mb-2">Tips</div>
-                  <ul className="text-xs text-slate-600 space-y-1 list-disc list-inside">
-                    <li>Motor positions update automatically; open Inventory for details.</li>
-                    <li>Base URL should be your exposed API root.</li>
-                    <li>Auth headers are optional and saved locally.</li>
-                  </ul>
-                </div>
-              </div>
-
             </section>
 
-            {/* Console */}
-            <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6 mt-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-slate-800 font-semibold">Console</h2>
-                <div className="flex gap-2">
-                  <button className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={()=>navigator.clipboard.writeText(JSON.stringify(logs,null,2))}><Icon name="copy" /><span className="ml-1">Copy</span></button>
-                  <button className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={()=>setLogs([])}><Icon name="trash" /><span className="ml-1">Clear</span></button>
+            {/* Telemetry & Targets */}
+            <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6">
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-slate-800 font-semibold">Telemetry & Targets</h2>
+                <div className="flex items-center gap-2">
+                  <select className="px-2 py-1 rounded-lg border border-slate-200" value={targetPose || ''} onChange={e=>setTargetPose(e.target.value || null)}>
+                    <option value="">No target</option>
+                    {Object.keys(taught).map(k=><option key={k} value={k}>{k}</option>)}
+                  </select>
+                  <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={()=>{
+                    const name = prompt("Save current as pose name:");
+                    if(!name) return;
+                    const angles = Object.fromEntries(motors.map(m=>[m.name, m.pos]));
+                    setTaught({...taught, [name]: angles});
+                    setTargetPose(name);
+                  }}><Icon name="target"/> Save current as pose</button>
                 </div>
               </div>
-              <div ref={logRef} className="console-area mt-3 bg-slate-950 text-slate-100 rounded-xl p-3 h-64 overflow-auto ring-1 ring-black/10">
+              <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+                {motors.map(m=>{
+                  const data = (series[m.name]||[]).map(s=>s.v).slice(-60); // last ~5 min at 5s? here 60 samples cap
+                  const delta = targetAngles && typeof targetAngles[m.name]==='number' ? (targetAngles[m.name]-m.pos) : 0;
+                  const dtheta = rates[m.name] || 0;
+                  return (
+                    <div key={m.name} className="border rounded-xl p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="font-semibold">{m.name}</div>
+                        <div className="text-sm text-slate-500">{Math.round(m.pos)}°</div>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between">
+                        <div className="text-xs text-slate-600">dθ/dt: {dtheta.toFixed(2)}°/s</div>
+                        <div className="text-xs text-slate-500">last {data.length}</div>
+                      </div>
+                      <div className="mt-1 text-slate-500"><Sparkline data={data}/></div>
+                      {targetAngles && <div className="mt-3 flex items-center justify-center"><DeltaGauge delta={delta}/></div>}
+                      {/* Heatmap */}
+                      <div className="mt-3">
+                        <div className="flex gap-0.5">{(bins[m.name]||[]).map((v,i)=>{
+                          const alpha = v ? Math.min(1, 0.15 + v / Math.max(...bins[m.name])) : 0.08;
+                          return <div key={i} className="h-2 w-3 rounded" style={{background:`rgba(31,144,255,${alpha})`}}></div>;
+                        })}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {targetAngles && (
+                <div className="mt-4 flex items-center gap-3">
+                  <label className="text-sm text-slate-700">Blend to target</label>
+                  <input type="range" min="0" max="100" defaultValue="0" onChange={e=>blendToPose(+e.target.value)}/>
+                </div>
+              )}
+            </section>
+
+            {/* Sequence Builder */}
+            <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6">
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-slate-800 font-semibold">Sequences</h2>
+                <div className="flex gap-2">
+                  <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={()=>{
+                    const name=prompt("Sequence name?"); if(!name) return;
+                    setSequences([...sequences, {id: 's'+Math.random().toString(36).slice(2,7), name, steps: []}]);
+                  }}><Icon name="plus"/>New</button>
+                  <button className={"px-3 py-2 rounded-xl " + (runner.running?'bg-amber-100 text-amber-900 border border-amber-300':'bg-white border border-slate-200')} onClick={()=>setSeqOpen(true)}>Manage</button>
+                </div>
+              </div>
+              {sequences.length===0 ? <div className="text-sm text-slate-600">No sequences yet. Create one and add steps.</div> :
+                <div className="grid md:grid-cols-2 gap-3">
+                  {sequences.map(seq=>(
+                    <div key={seq.id} className="border rounded-xl p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="font-semibold">{seq.name}</div>
+                        <div className="text-xs text-slate-500">{seq.steps.length} steps</div>
+                      </div>
+                      <div className="mt-2 flex gap-2">
+                        <button className="px-3 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white" onClick={()=>runSequence(seq)}><Icon name="play"/> Run</button>
+                        <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={()=>dryRun(seq)}><Icon name="tune"/> Dry run</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              }
+            </section>
+
+            {/* Console & Timeline */}
+            <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6">
+              <div className="flex items-center justify-between">
+                <h2 className="text-slate-800 font-semibold">Console & Timeline</h2>
+                <div className="flex gap-2">
+                  <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={()=>navigator.clipboard.writeText(JSON.stringify(logs,null,2))}><Icon name="copy"/><span className="ml-1">Copy</span></button>
+                  <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={()=>setLogs([])}><Icon name="trash"/><span className="ml-1">Clear</span></button>
+                </div>
+              </div>
+              {/* Timeline */}
+              <div className="mt-3 overflow-x-auto">
+                <div className="min-w-[520px]">
+                  {logs.slice(-50).map((l,idx)=> (
+                    <div key={idx} className="flex items-center gap-3 py-1 text-sm">
+                      <div className={"w-2 h-2 rounded-full " + (l.level==='err'?'bg-red-500': l.level==='ok'?'bg-emerald-500':'bg-sky-400')}></div>
+                      <div className="text-slate-500 w-24 shrink-0">{l.ts}</div>
+                      <div className="shrink-0 w-20 text-slate-500">{typeof l.ms==='number'? fmtMs(l.ms) : ''}</div>
+                      <div className="text-slate-800">{l.text}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* Raw console */}
+              <div className="console-area mt-3 bg-slate-950 text-slate-100 rounded-xl p-3 h-64 overflow-auto ring-1 ring-black/10">
                 {logs.length === 0 && <div className="text-slate-400">No logs yet. Actions will appear here.</div>}
                 {logs.map((l, idx) => (
                   <div key={idx} className="whitespace-pre-wrap text-sm">
                     <span className="text-brand-300">{l.ts}</span>{" "}
                     <span className={{"req":"text-sky-300","ok":"text-emerald-300","err":"text-red-300"}[l.level] || ""}>{l.text}</span>
-                    {l.body !== undefined && <pre className="text-xs text-slate-300 mt-1 mb-2 bg-slate-900/60 rounded p-2">{typeof l.body === "string" ? l.body : JSON.stringify(l.body, null, 2)}</pre>}
+                    {l.body !== undefined && <pre className="text-xs text-slate-300 mt-1 mb-2 bg-slate-900/60 rounded p-2">{typeof l.body === "string" ? l.body.slice(0,5000) : JSON.stringify(l.body, null, 2).slice(0,5000)}</pre>}
                   </div>
                 ))}
               </div>
             </section>
 
             {/* Nudge controls */}
-            <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6 mt-6">
+            <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6">
               <div className="flex items-center justify-between">
                 <h2 className="text-slate-800 font-semibold">Nudge controls</h2>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-slate-600">Step</span>
-                  <select className="px-3 py-2 rounded-xl bg-white border border-slate-200" value={step} onChange={e=>setStep(parseInt(e.target.value)||1)}>
-                    <option value="1">1&deg;</option>
-                    <option value="2">2&deg;</option>
-                    <option value="5">5&deg;</option>
-                    <option value="10">10&deg;</option>
+                  <select className="px-3 py-2 rounded-xl bg-white border border-slate-200" value={step} onChange={e=>window.localStorage.setItem('ra.step', JSON.stringify(parseInt(e.target.value)||1)) || location.reload()}>
+                    <option value="1">1°</option><option value="2">2°</option><option value="5">5°</option><option value="10">10°</option>
                   </select>
                 </div>
               </div>
@@ -210,22 +672,49 @@
                   <div key={m.id} className="border rounded-xl p-4">
                     <div className="flex items-center justify-between">
                       <div className="font-semibold">{m.name}</div>
-                      <div className="text-sm text-slate-500">{m.pos}&deg;</div>
+                      <div className="text-sm text-slate-500">{Math.round(m.pos)}°</div>
                     </div>
                     <div className="mt-3 flex gap-2">
-                      <button className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 w-full" onClick={()=>nudge(m,-step)}>-{step}&deg;</button>
-                      <button className="px-3 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white w-full" onClick={()=>nudge(m, step)}>+{step}&deg;</button>
+                      <button className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 w-full" onClick={()=>nudge(m.name,-(step||5))}>-{step||5}°</button>
+                      <button className="px-3 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white w-full" onClick={()=>nudge(m.name, (step||5))}>+{step||5}°</button>
                     </div>
                   </div>
                 ))}
               </div>
             </section>
 
-            {/* Custom request */}
-            <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6 mt-6">
+            {/* Speed vs Accuracy + Reliability */}
+            <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6">
               <div className="flex items-center justify-between">
-                <h2 className="text-slate-800 font-semibold">Custom request</h2>
+                <h2 className="text-slate-800 font-semibold">Analytics</h2>
+                <div className="text-xs text-slate-500">Reliability & tuning</div>
               </div>
+              <div className="mt-3 grid md:grid-cols-3 gap-4">
+                <div className="border rounded-xl p-3">
+                  <div className="text-sm font-semibold">Reliability (session)</div>
+                  <div className="mt-2 text-sm text-slate-700">Success: {reliab.successRate.toFixed(1)}%</div>
+                  <div className="text-sm text-slate-700">P50 latency: {fmtMs(reliab.p50)}</div>
+                  <div className="text-sm text-slate-700">P95 latency: {fmtMs(reliab.p95)}</div>
+                </div>
+                <div className="md:col-span-2 border rounded-xl p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-semibold">Speed vs Accuracy tuner</div>
+                    <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={async()=>{
+                      const res = await runTuner({joint: motors[0]?.name || "A"});
+                      alert("Tuner results: "+JSON.stringify(res));
+                    }}>Run sweep</button>
+                  </div>
+                  <div className="text-xs text-slate-600 mt-1">Runs tiny ±5° test on first joint, measures forward/return error per speed.</div>
+                </div>
+              </div>
+              <div className="mt-3">
+                <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={exportDiagnostics}><Icon name="dl"/> Export diagnostics</button>
+              </div>
+            </section>
+
+            {/* Custom request */}
+            <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6">
+              <h2 className="text-slate-800 font-semibold">Custom request</h2>
               <div className="mt-4 grid sm:grid-cols-5 gap-3">
                 <div>
                   <label className="block text-xs text-slate-600 mb-1">Method</label>
@@ -243,8 +732,10 @@
                 </div>
               </div>
               <div className="mt-3 flex gap-2">
-                <button className="px-3 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white" onClick={runCustom}>Send</button>
-                <button className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={refreshPositions}>Refresh positions</button>
+                <button className="px-3 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white" onClick={async()=>{
+                  let body; try{ body = customBody ? JSON.parse(customBody) : undefined; } catch { alert("Invalid JSON body"); return; }
+                  await api(customMethod, customPath, body, {queueIfOffline:true});
+                }}>Send</button>
               </div>
             </section>
           </main>
@@ -253,11 +744,11 @@
 
           {/* Inventory modal */}
           {inventoryOpen && (
-            <div className="fixed inset-0 z-40 flex items-center justify-center">
+            <div className="fixed inset-0 z-40 flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="inv-title">
               <div className="absolute inset-0 bg-black/40" onClick={()=>setInventoryOpen(false)}></div>
               <div className="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-md max-h-[80vh] overflow-auto">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-slate-800">Inventory</h3>
+                  <h3 id="inv-title" className="text-lg font-semibold text-slate-800">Inventory</h3>
                   <button className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200" onClick={()=>setInventoryOpen(false)}>Close</button>
                 </div>
                 {inventory ? (
@@ -265,31 +756,144 @@
                     {inventory.endpoints && (
                       <div>
                         <h4 className="font-semibold mb-1">Endpoints</h4>
-                        <ul className="list-disc list-inside space-y-1">
-                          {inventory.endpoints.map((e,i)=>(<li key={i}>{e}</li>))}
-                        </ul>
+                        <ul className="list-disc list-inside space-y-1">{inventory.endpoints.map((e,i)=>(<li key={i}>{e}</li>))}</ul>
                       </div>
                     )}
                     {inventory.poses && (
                       <div>
                         <h4 className="font-semibold mb-1">Poses</h4>
-                        <ul className="list-disc list-inside space-y-1">
-                          {inventory.poses.map((p,i)=>(<li key={i}>{p}</li>))}
-                        </ul>
+                        <ul className="list-disc list-inside space-y-1">{inventory.poses.map((p,i)=>(<li key={i}>{p}</li>))}</ul>
                       </div>
                     )}
                     {inventory.motors && (
                       <div>
                         <h4 className="font-semibold mb-1">Motors</h4>
-                        <ul className="list-disc list-inside space-y-1">
-                          {inventory.motors.map((m,i)=>(<li key={i}>{m}</li>))}
-                        </ul>
+                        <ul className="list-disc list-inside space-y-1">{inventory.motors.map((m,i)=>(<li key={i}>{m}</li>))}</ul>
                       </div>
                     )}
                   </div>
-                ) : (
-                  <div className="text-sm text-slate-500">No inventory data.</div>
-                )}
+                ) : ( <div className="text-sm text-slate-500">No inventory data.</div> )}
+              </div>
+            </div>
+          )}
+
+          {/* Jog modal */}
+          {jogMotor && (
+            <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-labelledby="jog-title">
+              <div className="absolute inset-0 bg-black/40" onClick={()=>{ setJogMotor(null); stopRepeat(); }}></div>
+              <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-xl p-6 w-full max-w-sm">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 id="jog-title" className="text-lg font-semibold">Jog {jogMotor.name}</h3>
+                  <button className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200" onClick={()=>{ setJogMotor(null); stopRepeat(); }}>Close</button>
+                </div>
+                <div className="text-sm text-slate-600 mb-2">Two-hand enable must be held to jog.</div>
+                <div className="flex items-center justify-between my-2">
+                  <button className="px-3 py-2 rounded-xl bg-white border border-slate-200 w-24"
+                          onMouseDown={()=>startRepeat(jogMotor.name, -1)}
+                          onMouseUp={stopRepeat}
+                          onMouseLeave={stopRepeat}>-1°</button>
+                  <button className={"px-3 py-2 rounded-xl w-24 " + (jogEnable? 'bg-emerald-600 text-white':'bg-slate-200 text-slate-800')}
+                          onMouseDown={()=>setJogEnable(true)} onMouseUp={()=>setJogEnable(false)} onMouseLeave={()=>setJogEnable(false)}>
+                    Enable
+                  </button>
+                  <button className="px-3 py-2 rounded-xl bg-brand-600 text-white w-24"
+                          onMouseDown={()=>startRepeat(jogMotor.name, +1)}
+                          onMouseUp={stopRepeat}
+                          onMouseLeave={stopRepeat}>+1°</button>
+                </div>
+                <div className="mt-3 text-sm text-slate-700">Soft limits: [{(limits[jogMotor.name]?.min ?? -180)}°, {(limits[jogMotor.name]?.max ?? 180)}°]</div>
+                <div className="mt-3 flex gap-2">
+                  <input type="number" className="w-24 px-2 py-1 rounded border" placeholder="min" value={limits[jogMotor.name]?.min ?? ''}
+                         onChange={e=>setLimits({...limits, [jogMotor.name]: {...(limits[jogMotor.name]||{}), min:+e.target.value}})} />
+                  <input type="number" className="w-24 px-2 py-1 rounded border" placeholder="max" value={limits[jogMotor.name]?.max ?? ''}
+                         onChange={e=>setLimits({...limits, [jogMotor.name]: {...(limits[jogMotor.name]||{}), max:+e.target.value}})} />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Sequences manager modal */}
+          {seqOpen && (
+            <div className="fixed inset-0 z-50">
+              <div className="absolute inset-0 bg-black/40" onClick={()=>setSeqOpen(false)}></div>
+              <div className="absolute right-0 top-0 h-full w-full max-w-lg bg-white shadow-xl p-6 flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold">Sequences</h3>
+                  <button className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200" onClick={()=>setSeqOpen(false)}>Close</button>
+                </div>
+                {sequences.map(seq=> (
+                  <div key={seq.id} className="border rounded-lg p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <input className="font-semibold w-1/2" value={seq.name} onChange={e=>setSequences(sequences.map(s=>s.id===seq.id?{...s,name:e.target.value}:s))}/>
+                      <div className="flex gap-2">
+                        <button className="px-3 py-1.5 rounded bg-brand-600 text-white" onClick={()=>runSequence(seq)}><Icon name="play"/></button>
+                        <button className="px-3 py-1.5 rounded bg-white border" onClick={()=>dryRun(seq)}><Icon name="tune"/></button>
+                        <button className="px-3 py-1.5 rounded bg-white border" onClick={()=>setSequences(sequences.filter(s=>s.id!==seq.id))}><Icon name="trash"/></button>
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-600">Steps</div>
+                    <div className="mt-1 space-y-2">
+                      {seq.steps.map((st,idx)=> (
+                        <div key={idx} className="flex items-center gap-2">
+                          <select className="border rounded px-2 py-1" value={st.type} onChange={e=>{
+                            const t=e.target.value; const s={...st, type:t};
+                            setSequences(sequences.map(x=>x.id===seq.id?{...x, steps: seq.steps.map((y,i)=>i===idx?s:y)}:x));
+                          }}>
+                            <option>pose</option><option>move</option><option>wait</option><option>stop</option>
+                          </select>
+                          {st.type==='pose' && <input className="border rounded px-2 py-1" placeholder="name" value={st.name||''} onChange={e=>{
+                            const s={...st, name:e.target.value}; setSequences(sequences.map(x=>x.id===seq.id?{...x, steps: seq.steps.map((y,i)=>i===idx?s:y)}:x));
+                          }}/>}
+                          {st.type==='move' && <input className="border rounded px-2 py-1 flex-1" placeholder='{"A":10,"B":-5}' value={JSON.stringify(st.joints||{})} onChange={e=>{
+                            let joints={}; try{ joints=JSON.parse(e.target.value) }catch{}; const s={...st, joints}; setSequences(sequences.map(x=>x.id===seq.id?{...x, steps: seq.steps.map((y,i)=>i===idx?s:y)}:x));
+                          }}/>}
+                          {st.type==='wait' && <input type="number" className="border rounded px-2 py-1 w-24" placeholder="ms" value={st.ms||500} onChange={e=>{
+                            const s={...st, ms:+e.target.value}; setSequences(sequences.map(x=>x.id===seq.id?{...x, steps: seq.steps.map((y,i)=>i===idx?s:y)}:x));
+                          }}/>}
+                          <button className="px-2 py-1 rounded bg-white border" onClick={()=>{
+                            setSequences(sequences.map(x=>x.id===seq.id?{...x, steps: seq.steps.filter((_,i)=>i!==idx)}:x));
+                          }}><Icon name="trash"/></button>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-2 flex gap-2">
+                      <button className="px-3 py-1.5 rounded bg-white border" onClick={()=>{
+                        setSequences(sequences.map(x=>x.id===seq.id?{...x, steps:[...x.steps, {type:'pose', name:'home', speed:60}]}:x));
+                      }}><Icon name="plus"/>Pose</button>
+                      <button className="px-3 py-1.5 rounded bg-white border" onClick={()=>{
+                        setSequences(sequences.map(x=>x.id===seq.id?{...x, steps:[...x.steps, {type:'move', joints:{A:5}, speed:60}]}:x));
+                      }}><Icon name="plus"/>Move</button>
+                      <button className="px-3 py-1.5 rounded bg-white border" onClick={()=>{
+                        setSequences(sequences.map(x=>x.id===seq.id?{...x, steps:[...x.steps, {type:'wait', ms:500}]}:x));
+                      }}><Icon name="plus"/>Wait</button>
+                      <button className="px-3 py-1.5 rounded bg-white border" onClick={()=>{
+                        setSequences(sequences.map(x=>x.id===seq.id?{...x, steps:[...x.steps, {type:'stop'}]}:x));
+                      }}><Icon name="plus"/>Stop</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+          {/* QR Bootstrap */}
+          {qrOpen && (
+            <div className="fixed inset-0 z-50">
+              <div className="absolute inset-0 bg-black/40" onClick={()=>setQrOpen(false)}></div>
+              <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-xl p-6 w-full max-w-sm">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-lg font-semibold">Scan QR</h3>
+                  <button className="px-2 py-1 rounded bg-slate-100" onClick={()=>setQrOpen(false)}>Close</button>
+                </div>
+                <div className="text-sm text-slate-600 mb-2">QR text should include baseUrl and apiKey (JSON or querystring).</div>
+                <video id="qr-video" className="w-full rounded border"></video>
+                <div className="mt-3 flex gap-2">
+                  <button className="px-3 py-2 rounded-xl bg-brand-600 text-white" onClick={async()=>{
+                    if(!window.QrScanner){ alert("QR library not loaded."); return; }
+                    const video=document.getElementById('qr-video');
+                    const scanner=new window.QrScanner(video, result=>{ parseQr(result?.data || result); scanner.stop(); setQrOpen(false); }, {highlightScanRegion:true});
+                    await scanner.start();
+                  }}>Start</button>
+                </div>
               </div>
             </div>
           )}
@@ -298,19 +902,26 @@
           {adminOpen && (
             <div className="fixed inset-0 z-50">
               <div className="absolute inset-0 bg-black/40" onClick={()=>setAdminOpen(false)}></div>
-              <aside className="absolute right-0 top-0 h-full w-full max-w-md bg-white shadow-xl p-6 flex flex-col">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-slate-800">Admin panel</h3>
+              <aside className="absolute right-0 top-0 h-full w-full max-w-md bg-white shadow-xl p-6 flex flex-col gap-2">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-lg font-semibold text-slate-800">Admin</h3>
                   <button className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200" onClick={()=>setAdminOpen(false)}>Close</button>
                 </div>
-                <p className="text-sm text-slate-600 mb-4">Connection settings are stored locally in your browser.</p>
-                <label className="block text-xs text-slate-600 mb-1">Base URL</label>
-                <input className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 mb-3" placeholder="https://your-ngrok-url.example" value={baseUrl} onChange={e=>setBaseUrl(e.target.value)} />
-                <label className="block text-xs text-slate-600 mb-1">API key (optional)</label>
-                <input className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 mb-6" placeholder="api key..." value={apiKey} onChange={e=>setApiKey(e.target.value)} />
-                <div className="mt-auto flex gap-2">
-                  <button className="px-3 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white" onClick={()=>setAdminOpen(false)}>Save</button>
-                  <button className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={()=>{setBaseUrl('');setApiKey('');}}>Clear</button>
+                <label className="block text-xs text-slate-600">Base URL</label>
+                <input className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200" placeholder="https://your-ngrok-url.example" value={baseUrl} onChange={e=>setBaseUrl(e.target.value)} />
+                <label className="block text-xs text-slate-600">API key (optional)</label>
+                <input className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200" placeholder="api key..." value={apiKey} onChange={e=>setApiKey(e.target.value)} />
+                <div className="mt-2 flex gap-2">
+                  <button className="px-3 py-2 rounded-xl bg-brand-600 text-white" onClick={()=>setAdminOpen(false)}>Save</button>
+                  <button className="px-3 py-2 rounded-xl bg-white border" onClick={()=>{ setBaseUrl(''); setApiKey(''); }}>Clear</button>
+                </div>
+                <div className="mt-4">
+                  <div className="text-sm font-semibold mb-1">Tilt-to-nudge (demo)</div>
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-2"><input type="checkbox" checked={tiltEnabled} onChange={e=>setTiltEnabled(e.target.checked)} /> Enable</label>
+                    <label>Motor <select className="border rounded px-2 py-1" value={tiltMotor} onChange={e=>setTiltMotor(e.target.value)}>{motors.map(m=><option key={m.name}>{m.name}</option>)}</select></label>
+                    <label>Gain <input type="number" className="border rounded px-2 py-1 w-20" value={tiltGain} step="0.05" min="0" max="1" onChange={e=>setTiltGain(parseFloat(e.target.value)||0}/></label>
+                  </div>
                 </div>
               </aside>
             </div>
