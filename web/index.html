@@ -1,4 +1,4 @@
-<!-- Robot Arm Control v4.0 -->
+<!-- Robot Arm Control v4.0.1 (regex fix + minor cleanup) -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -16,15 +16,14 @@
     .glass { background: rgba(255,255,255,0.18); border: 1px solid rgba(255,255,255,0.25); box-shadow: 0 8px 24px rgba(0,0,0,0.10); backdrop-filter: saturate(160%) blur(8px); }
     .soft-shadow { box-shadow: 0 14px 32px -8px rgba(2,132,199,.35); }
     .console-area { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-    .btn { @apply px-3 py-2 rounded-xl; }
   </style>
 </head>
 <body class="antialiased text-slate-800">
   <div id="root"></div>
 
-  <!-- React (dev builds for ease of inline Babel editing; swap to production for field use) -->
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <!-- React (prod UMD to cut dev noise; JSX still handled by Babel) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <!-- Optional QR scanner CDN (used if available) -->
@@ -37,7 +36,10 @@
     const now = () => Date.now();
     const fmtMs = ms => (ms<1000? ms+'ms' : (ms/1000).toFixed(2)+'s');
     const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
-    const join = (a,b)=>a.replace(/\\/+$/,'') + '/' + b.replace(/^\\/+/, '');
+    // FIX: correct regex to strip *forward* slashes, and avoid Babel parsing ambiguity
+    const join = (a,b)=>String(a).replace(/\\/\\/+$/,'').replace(/\\/\\/$/,'') + '/' + String(b).replace(/^\\/+/, '');
+    // Alternative (clearer) version:
+    // const join = (a,b)=>`${a}`.replace(/\\/+$/, '') + '/' + `${b}`.replace(/^\\+/, '');
     const MOTOR_ORDER = ["A","B","C","D","E","F"]; // extendable
 
     function useLocalStorage(key, initial){
@@ -84,14 +86,12 @@
 
     // Radial delta gauge (simple arc)
     const DeltaGauge = ({delta, tol=1, size=68}) => {
-      // delta in degrees; green if within tol
       const r = (size/2)-6, cx=size/2, cy=size/2;
-      const clamped = clamp(Math.abs(delta), 0, 90);
+      const clamped = Math.abs(delta) > 90 ? 90 : Math.abs(delta);
       const angle = (clamped/90)*Math.PI; // 0..pi
       const x = cx + r*Math.cos(Math.PI - angle);
       const y = cy + r*Math.sin(Math.PI - angle);
-      const large = 0;
-      const path = `M ${cx-r} ${cy} A ${r} ${r} 0 ${large} 1 ${x} ${y}`;
+      const path = `M ${cx-r} ${cy} A ${r} ${r} 0 0 1 ${x} ${y}`;
       const ok = Math.abs(delta) <= tol;
       return (
         <svg width={size} height={size} className="text-slate-300">
@@ -118,7 +118,7 @@
 
       // Core state
       const [connected,setConnected]=useState(false);
-      const [motors,setMotors]=useLocalStorage("ra.motors",["A","B","C","D"].map((n,i)=>({id:i+1,name=n,pos:0})));
+      const [motors,setMotors]=useLocalStorage("ra.motors",["A","B","C","D"].map((n,i)=>({id:i+1,name:n,pos:0})));
       const [logs,setLogs]=useLocalStorage("ra.logs",[]);
       const [inventory,setInventory]=useState(null);
       const [inventoryOpen,setInventoryOpen]=useState(false);
@@ -145,14 +145,14 @@
       const [offlineQueue,setOfflineQueue]=useLocalStorage("ra.offlineQueue", []); // [{method,path,body,ts}]
 
       // Jog Modal
-      const [jogMotor,setJogMotor]=useState(null); // {id,name,pos}
+      const [jogMotor,setJogMotor]=useState(null);
       const [jogEnable,setJogEnable]=useState(false);
       const repeatRef = useRef(null);
 
       // Tilt-to-nudge
       const [tiltEnabled,setTiltEnabled]=useState(false);
       const [tiltMotor,setTiltMotor]=useState("A");
-      const [tiltGain,setTiltGain]=useState(0.2); // deg per beta degree
+      const [tiltGain,setTiltGain]=useState(0.2);
 
       // Custom
       const [customPath,setCustomPath]=useState("/v1/arm/move");
@@ -205,7 +205,6 @@
         } finally { clearTimeout(t); }
       }
 
-      // Execute queued commands (explicit)
       async function runQueue(){
         if(!connected || offlineQueue.length===0) return;
         for(const item of offlineQueue){
@@ -214,7 +213,6 @@
         setOfflineQueue([]);
       }
 
-      // Health & state polling
       async function checkHealth(){
         try{ await api("GET","/v1/health"); setConnected(true); }
         catch{ setConnected(false); }
@@ -231,8 +229,6 @@
               .sort((a,b)=>MOTOR_ORDER.indexOf(a.name)-MOTOR_ORDER.indexOf(b.name))
               .map((m,i)=>({id:i+1,...m}));
             setMotors(ordered);
-
-            // Update ring buffer
             const sample = { t: now(), angles: Object.fromEntries(ordered.map(m=>[m.name, m.pos])) };
             setRing(prev => {
               const arr = [...prev, sample];
@@ -257,7 +253,6 @@
       async function stop(){ await api("POST","/v1/arm/stop",{reason:"ui stop"},{queueIfOffline:true}).catch(()=>{}); }
 
       async function nudge(name, delta, speed=60){
-        // Soft-limit check
         const cur = motors.find(m=>m.name===name)?.pos ?? 0;
         const lim = limits[name] || {min:-9999,max:9999};
         const next = cur + delta;
@@ -267,13 +262,11 @@
         }
         const joints={}; joints[name]=delta;
         await api("POST","/v1/arm/move",{mode:"relative",joints,speed},{queueIfOffline:true}).catch(()=>{});
-        // optimistic UI
         setMotors(p=>p.map(x=>x.name===name?{...x,pos:x.pos+delta}:x));
       }
 
       async function refresh(){ await updatePositions(); }
 
-      // Polling intervals & tab visibility
       useEffect(()=>{ checkHealth(); const id=setInterval(checkHealth,15000); return ()=>clearInterval(id); }, [baseUrl, apiKey]);
       useEffect(()=>{
         if(!baseUrl) return;
@@ -284,7 +277,7 @@
         return ()=>{ clearInterval(id); document.removeEventListener("visibilitychange", onVis); };
       }, [baseUrl, apiKey]);
 
-      // ---------- Analytics from ring/logs ----------
+      // ---------- Analytics ----------
       const series = useMemo(()=>{
         const names = Object.keys(motors.reduce((acc,m)=> (acc[m.name]=1, acc), {}));
         const byName = Object.fromEntries(names.map(n=>[n, []]));
@@ -307,24 +300,20 @@
         const ok = logs.filter(l=>l.level==='ok').length;
         const err = logs.filter(l=>l.level==='err').length;
         const total = ok+err || 1;
-        return {
-          successRate: (ok/total)*100,
-          p50: percentile(latencies, 50),
-          p95: percentile(latencies, 95),
-        };
+        return { successRate: (ok/total)*100, p50: percentile(latencies, 50), p95: percentile(latencies, 95) };
       }, [logs, latencies]);
 
-      // Heatmap bins
       const bins = useMemo(()=>{
-        const B=18; // 10° bins over 180° range (adjusted to observed)
+        const B=18;
         const out={};
         for(const n of Object.keys(series)){
           const arr=new Array(B).fill(0);
           const values = series[n].map(x=>x.v);
           if(values.length){
             const min=Math.min(...values), max=Math.max(...values);
+            const denom = (max-min) || 1;
             for(const v of values){
-              const idx = clamp(Math.floor(((v-min)/(max-min||1)) * (B-1)), 0, B-1);
+              const idx = Math.max(0, Math.min(B-1, Math.floor(((v-min)/denom) * (B-1))));
               arr[idx]++;
             }
           }
@@ -333,13 +322,11 @@
         return out;
       }, [series]);
 
-      // Target pose angles (from taught pose or "captured target")
       const targetAngles = useMemo(()=>{
         if(targetPose && taught[targetPose]) return taught[targetPose];
         return null;
       }, [targetPose, taught]);
 
-      // ---------- Jog modal logic (long-press + two-hand enable) ----------
       function startRepeat(name, delta){
         if(!jogEnable) return;
         if(repeatRef.current) return;
@@ -348,7 +335,6 @@
       }
       function stopRepeat(){ if(repeatRef.current){ clearInterval(repeatRef.current); repeatRef.current=null; } }
 
-      // ---------- Sequence runner ----------
       async function runSequence(seq){
         setRunner({running:true, idx:0, startedAt:now(), paused:false});
         for(let i=0;i<seq.steps.length;i++){
@@ -365,20 +351,18 @@
       }
 
       function dryRun(seq){
-        // Estimate simple duration: waits + (moves: ms per degree) + pose fixed ms
         let ms=0;
         for(const s of seq.steps){
           if(s.type==='wait') ms += s.ms||500;
           if(s.type==='move'){
             const total = Object.values(s.joints||{}).reduce((a,b)=>a+Math.abs(b),0);
-            ms += (total * (1000/(s.speed||60))); // naive
+            ms += (total * (1000/(s.speed||60)));
           }
-          if(s.type==='pose') ms += 700; // naive assume
+          if(s.type==='pose') ms += 700;
         }
         alert("Estimated duration: "+fmtMs(ms));
       }
 
-      // ---------- Blend-to-pose ----------
       function blendToPose(percent, speed=60){
         if(!targetAngles) return;
         const joints={};
@@ -393,7 +377,6 @@
         }
       }
 
-      // ---------- Speed vs Accuracy tuner ----------
       async function runTuner({joint="A", amplitude=5, speeds=[20,40,60,80], settleMs=350}){
         const results=[];
         for(const sp of speeds){
@@ -413,7 +396,6 @@
         return results;
       }
 
-      // ---------- Diagnostics export ----------
       function exportDiagnostics(){
         const blob = new Blob([JSON.stringify({
           ts: new Date().toISOString(),
@@ -433,9 +415,7 @@
         URL.revokeObjectURL(url);
       }
 
-      // ---------- QR Bootstrap ----------
       function parseQr(text){
-        // Accept JSON or key=value&key2=value2
         try {
           const j = JSON.parse(text);
           if(j.baseUrl) setBaseUrl(j.baseUrl);
@@ -447,20 +427,17 @@
         if(params.get('apiKey')) setApiKey(params.get('apiKey'));
       }
 
-      // ---------- Tilt-to-nudge ----------
       useEffect(()=>{
         if(!tiltEnabled) return;
         function onOrient(e){
-          // Use beta (front-back tilt) -> delta on selected motor
-          const beta = e.beta || 0; // -180..180
-          const delta = clamp(beta * tiltGain, -2, 2); // small deltas
-          if(Math.abs(delta) > 0.2) nudge(tiltMotor, Math.sign(delta)); // 1 deg step
+          const beta = e.beta || 0;
+          const delta = clamp(beta * tiltGain, -2, 2);
+          if(Math.abs(delta) > 0.2) nudge(tiltMotor, Math.sign(delta));
         }
         window.addEventListener('deviceorientation', onOrient);
         return ()=> window.removeEventListener('deviceorientation', onOrient);
       }, [tiltEnabled, tiltMotor, tiltGain, motors]);
 
-      // ---------- UI ----------
       const StatusPill = () => (
         <div className={"inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white text-slate-800 shadow-sm ring-1 " + (connected ? 'ring-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' : 'ring-slate-200')}>
           <span className={"w-2.5 h-2.5 rounded-full " + (connected ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]' : 'bg-slate-300')}></span>
@@ -468,16 +445,13 @@
         </div>
       );
 
-      // ----- Render -----
       return (
         <div className="min-h-screen relative">
-          {/* Header */}
           <header className="relative bg-gradient-to-b from-brand-600 to-brand-700 text-white soft-shadow overflow-visible">
             <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-4">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-3">
                   <h1 className="text-2xl font-semibold tracking-tight drop-shadow-sm">Lego Arm Control</h1>
-                  {/* Fleet switcher */}
                   <select className="px-2 py-1 rounded-lg bg-white/10 border border-white/30" value={currentId} onChange={e=>setCurrentId(e.target.value)}>
                     {fleet.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
                   </select>
@@ -495,22 +469,20 @@
               </div>
             </div>
 
-            {/* Hero & stacked motor pills */}
             <div className="relative max-w-6xl mx-auto px-4 sm:px-6 h-[18rem] sm:h-[22rem]">
               <img src="robot-arm.png" alt="Robot Arm" className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-[20%] pointer-events-none select-none max-h-[20rem] sm:max-h-[24rem] drop-shadow-[0_16px_36px_rgba(31,144,255,0.55)]" />
               <div className="absolute right-4 sm:right-6 top-1/2 -translate-y-1/2 flex flex-col gap-2 items-end">
                 {motors.map(m => (
-                  <MotorPill key={m.id}>
+                  <div key={m.id} className="glass inline-flex items-center gap-1 px-2 py-1 rounded-full text-white text-[11px]">
                     <span className="font-semibold">{m.name}</span>
                     <span className="opacity-90 ml-0.5">{Math.round(m.pos)}°</span>
                     <button className="ml-1 px-1 py-0.5 rounded bg-white/20 hover:bg-white/30" title="Jog" onClick={()=>setJogMotor(m)}>J</button>
-                  </MotorPill>
+                  </div>
                 ))}
               </div>
             </div>
           </header>
 
-          {/* Status pill */}
           <div className="max-w-6xl mx-auto px-4 sm:px-6 mt-6 relative z-10 flex items-center gap-3">
             <StatusPill />
             {offlineQueue.length>0 && connected && (
@@ -520,9 +492,7 @@
             )}
           </div>
 
-          {/* Main */}
           <main className="max-w-6xl mx-auto px-4 sm:px-6 pt-12 sm:pt-16 pb-20 space-y-6">
-            {/* Quick actions */}
             <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6">
               <div className="flex items-center justify-between">
                 <h2 className="text-slate-800 font-semibold">General</h2>
@@ -537,7 +507,6 @@
               </div>
             </section>
 
-            {/* Telemetry & Targets */}
             <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6">
               <div className="flex items-center justify-between mb-2">
                 <h2 className="text-slate-800 font-semibold">Telemetry & Targets</h2>
@@ -552,12 +521,12 @@
                     const angles = Object.fromEntries(motors.map(m=>[m.name, m.pos]));
                     setTaught({...taught, [name]: angles});
                     setTargetPose(name);
-                  }}><Icon name="target"/> Save current as pose</button>
+                  }}><span className="inline-flex items-center gap-1"><span>🎯</span><span>Save current as pose</span></span></button>
                 </div>
               </div>
               <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
                 {motors.map(m=>{
-                  const data = (series[m.name]||[]).map(s=>s.v).slice(-60); // last ~5 min at 5s? here 60 samples cap
+                  const data = (series[m.name]||[]).map(s=>s.v).slice(-60);
                   const delta = targetAngles && typeof targetAngles[m.name]==='number' ? (targetAngles[m.name]-m.pos) : 0;
                   const dtheta = rates[m.name] || 0;
                   return (
@@ -570,12 +539,12 @@
                         <div className="text-xs text-slate-600">dθ/dt: {dtheta.toFixed(2)}°/s</div>
                         <div className="text-xs text-slate-500">last {data.length}</div>
                       </div>
-                      <div className="mt-1 text-slate-500"><Sparkline data={data}/></div>
-                      {targetAngles && <div className="mt-3 flex items-center justify-center"><DeltaGauge delta={delta}/></div>}
-                      {/* Heatmap */}
+                      <div className="mt-1 text-slate-500">{React.createElement(Sparkline,{data})}</div>
+                      {targetAngles && <div className="mt-3 flex items-center justify-center">{React.createElement(DeltaGauge,{delta})}</div>}
                       <div className="mt-3">
                         <div className="flex gap-0.5">{(bins[m.name]||[]).map((v,i)=>{
-                          const alpha = v ? Math.min(1, 0.15 + v / Math.max(...bins[m.name])) : 0.08;
+                          const maxv = Math.max(1, ...(bins[m.name]||[1]));
+                          const alpha = v ? Math.min(1, 0.15 + v / maxv) : 0.08;
                           return <div key={i} className="h-2 w-3 rounded" style={{background:`rgba(31,144,255,${alpha})`}}></div>;
                         })}</div>
                       </div>
@@ -591,7 +560,6 @@
               )}
             </section>
 
-            {/* Sequence Builder */}
             <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6">
               <div className="flex items-center justify-between mb-2">
                 <h2 className="text-slate-800 font-semibold">Sequences</h2>
@@ -599,7 +567,7 @@
                   <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={()=>{
                     const name=prompt("Sequence name?"); if(!name) return;
                     setSequences([...sequences, {id: 's'+Math.random().toString(36).slice(2,7), name, steps: []}]);
-                  }}><Icon name="plus"/>New</button>
+                  }}>➕ New</button>
                   <button className={"px-3 py-2 rounded-xl " + (runner.running?'bg-amber-100 text-amber-900 border border-amber-300':'bg-white border border-slate-200')} onClick={()=>setSeqOpen(true)}>Manage</button>
                 </div>
               </div>
@@ -612,8 +580,8 @@
                         <div className="text-xs text-slate-500">{seq.steps.length} steps</div>
                       </div>
                       <div className="mt-2 flex gap-2">
-                        <button className="px-3 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white" onClick={()=>runSequence(seq)}><Icon name="play"/> Run</button>
-                        <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={()=>dryRun(seq)}><Icon name="tune"/> Dry run</button>
+                        <button className="px-3 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white" onClick={()=>runSequence(seq)}>▶ Run</button>
+                        <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={()=>dryRun(seq)}>🛠️ Dry run</button>
                       </div>
                     </div>
                   ))}
@@ -621,16 +589,14 @@
               }
             </section>
 
-            {/* Console & Timeline */}
             <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6">
               <div className="flex items-center justify-between">
                 <h2 className="text-slate-800 font-semibold">Console & Timeline</h2>
                 <div className="flex gap-2">
-                  <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={()=>navigator.clipboard.writeText(JSON.stringify(logs,null,2))}><Icon name="copy"/><span className="ml-1">Copy</span></button>
-                  <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={()=>setLogs([])}><Icon name="trash"/><span className="ml-1">Clear</span></button>
+                  <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={()=>navigator.clipboard.writeText(JSON.stringify(logs,null,2))}>⧉ Copy</button>
+                  <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={()=>setLogs([])}>🗑️ Clear</button>
                 </div>
               </div>
-              {/* Timeline */}
               <div className="mt-3 overflow-x-auto">
                 <div className="min-w-[520px]">
                   {logs.slice(-50).map((l,idx)=> (
@@ -643,7 +609,6 @@
                   ))}
                 </div>
               </div>
-              {/* Raw console */}
               <div className="console-area mt-3 bg-slate-950 text-slate-100 rounded-xl p-3 h-64 overflow-auto ring-1 ring-black/10">
                 {logs.length === 0 && <div className="text-slate-400">No logs yet. Actions will appear here.</div>}
                 {logs.map((l, idx) => (
@@ -656,7 +621,6 @@
               </div>
             </section>
 
-            {/* Nudge controls */}
             <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6">
               <div className="flex items-center justify-between">
                 <h2 className="text-slate-800 font-semibold">Nudge controls</h2>
@@ -683,7 +647,6 @@
               </div>
             </section>
 
-            {/* Speed vs Accuracy + Reliability */}
             <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6">
               <div className="flex items-center justify-between">
                 <h2 className="text-slate-800 font-semibold">Analytics</h2>
@@ -708,11 +671,10 @@
                 </div>
               </div>
               <div className="mt-3">
-                <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={exportDiagnostics}><Icon name="dl"/> Export diagnostics</button>
+                <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={exportDiagnostics}>⬇️ Export diagnostics</button>
               </div>
             </section>
 
-            {/* Custom request */}
             <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6">
               <h2 className="text-slate-800 font-semibold">Custom request</h2>
               <div className="mt-4 grid sm:grid-cols-5 gap-3">
@@ -742,7 +704,6 @@
 
           <footer className="py-6 text-center text-xs text-slate-500">Built with React + Tailwind. Settings are saved in your browser.</footer>
 
-          {/* Inventory modal */}
           {inventoryOpen && (
             <div className="fixed inset-0 z-40 flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="inv-title">
               <div className="absolute inset-0 bg-black/40" onClick={()=>setInventoryOpen(false)}></div>
@@ -777,7 +738,6 @@
             </div>
           )}
 
-          {/* Jog modal */}
           {jogMotor && (
             <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-labelledby="jog-title">
               <div className="absolute inset-0 bg-black/40" onClick={()=>{ setJogMotor(null); stopRepeat(); }}></div>
@@ -812,7 +772,6 @@
             </div>
           )}
 
-          {/* Sequences manager modal */}
           {seqOpen && (
             <div className="fixed inset-0 z-50">
               <div className="absolute inset-0 bg-black/40" onClick={()=>setSeqOpen(false)}></div>
@@ -826,9 +785,9 @@
                     <div className="flex items-center justify-between mb-2">
                       <input className="font-semibold w-1/2" value={seq.name} onChange={e=>setSequences(sequences.map(s=>s.id===seq.id?{...s,name:e.target.value}:s))}/>
                       <div className="flex gap-2">
-                        <button className="px-3 py-1.5 rounded bg-brand-600 text-white" onClick={()=>runSequence(seq)}><Icon name="play"/></button>
-                        <button className="px-3 py-1.5 rounded bg-white border" onClick={()=>dryRun(seq)}><Icon name="tune"/></button>
-                        <button className="px-3 py-1.5 rounded bg-white border" onClick={()=>setSequences(sequences.filter(s=>s.id!==seq.id))}><Icon name="trash"/></button>
+                        <button className="px-3 py-1.5 rounded bg-brand-600 text-white" onClick={()=>runSequence(seq)}>▶</button>
+                        <button className="px-3 py-1.5 rounded bg-white border" onClick={()=>dryRun(seq)}>🛠️</button>
+                        <button className="px-3 py-1.5 rounded bg-white border" onClick={()=>setSequences(sequences.filter(s=>s.id!==seq.id))}>🗑️</button>
                       </div>
                     </div>
                     <div className="text-xs text-slate-600">Steps</div>
@@ -852,30 +811,29 @@
                           }}/>}
                           <button className="px-2 py-1 rounded bg-white border" onClick={()=>{
                             setSequences(sequences.map(x=>x.id===seq.id?{...x, steps: seq.steps.filter((_,i)=>i!==idx)}:x));
-                          }}><Icon name="trash"/></button>
+                          }}>🗑️</button>
                         </div>
                       ))}
                     </div>
                     <div className="mt-2 flex gap-2">
                       <button className="px-3 py-1.5 rounded bg-white border" onClick={()=>{
                         setSequences(sequences.map(x=>x.id===seq.id?{...x, steps:[...x.steps, {type:'pose', name:'home', speed:60}]}:x));
-                      }}><Icon name="plus"/>Pose</button>
+                      }}>+ Pose</button>
                       <button className="px-3 py-1.5 rounded bg-white border" onClick={()=>{
                         setSequences(sequences.map(x=>x.id===seq.id?{...x, steps:[...x.steps, {type:'move', joints:{A:5}, speed:60}]}:x));
-                      }}><Icon name="plus"/>Move</button>
+                      }}>+ Move</button>
                       <button className="px-3 py-1.5 rounded bg-white border" onClick={()=>{
                         setSequences(sequences.map(x=>x.id===seq.id?{...x, steps:[...x.steps, {type:'wait', ms:500}]}:x));
-                      }}><Icon name="plus"/>Wait</button>
+                      }}>+ Wait</button>
                       <button className="px-3 py-1.5 rounded bg-white border" onClick={()=>{
                         setSequences(sequences.map(x=>x.id===seq.id?{...x, steps:[...x.steps, {type:'stop'}]}:x));
-                      }}><Icon name="plus"/>Stop</button>
+                      }}>+ Stop</button>
                     </div>
                   </div>
                 ))}
               </div>
             )}
 
-          {/* QR Bootstrap */}
           {qrOpen && (
             <div className="fixed inset-0 z-50">
               <div className="absolute inset-0 bg-black/40" onClick={()=>setQrOpen(false)}></div>
@@ -898,7 +856,6 @@
             </div>
           )}
 
-          {/* Admin Drawer */}
           {adminOpen && (
             <div className="fixed inset-0 z-50">
               <div className="absolute inset-0 bg-black/40" onClick={()=>setAdminOpen(false)}></div>
