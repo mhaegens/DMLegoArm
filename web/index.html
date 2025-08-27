@@ -1,4 +1,4 @@
-<!-- Robot Arm Control v4.2.2 -->
+<!-- Robot Arm Control v4.2.4 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -76,7 +76,6 @@
       <div className="glass inline-flex items-center gap-1 px-2 py-1 rounded-full text-white text-[11px]">{children}</div>
     );
 
-    // Tiny sparkline
     const Sparkline = ({data, width=80, height=20, padding=2}) => {
       if(!data || data.length<2) return <svg width={width} height={height}></svg>;
       const min = Math.min(...data), max = Math.max(...data);
@@ -87,7 +86,6 @@
       return <svg width={width} height={height}><path d={d} fill="none" stroke="currentColor" strokeWidth="1"/></svg>;
     };
 
-    // Delta gauge
     const DeltaGauge = ({delta, tol=1, size=68}) => {
       const r = (size/2)-6, cx=size/2, cy=size/2;
       const clamped = Math.abs(delta) > 90 ? 90 : Math.abs(delta);
@@ -114,7 +112,10 @@
 
       // Core state
       const [connected,setConnected]=useState(false);
-      const [motors,setMotors]=useLocalStorage("ra.motors",["A","B","C","D"].map((n,i)=>({id:i+1,name:n,pos:0})));
+        const [motors, setMotors] = useLocalStorage(
+        "ra.motors",
+        ["A","B","C","D"].map((n, i) => ({ id: i + 1, name: n, pos: 0 }))
+        );
       const [logs,setLogs]=useLocalStorage("ra.logs",[]);
       const [inventory,setInventory]=useState(null);
       const [inventoryOpen,setInventoryOpen]=useState(false);
@@ -148,10 +149,10 @@
       // Tilt-to-nudge (global permission; action gated by jogEnable + jogMotor)
       const [tiltEnabled,setTiltEnabled]=useState(false);
       const [tiltReady,setTiltReady]=useState(false);
-      const [tiltGain,setTiltGain]=useLocalStorage("ra.tiltGain", 0.20); // sensitivity
-      const [tiltBeta,setTiltBeta]=useState(0);     // live device beta
-      const tiltZeroRef = useRef(0);                // auto-calibrated baseline (set when Enable is pressed)
-      const lastTiltTimeRef = useRef(0);            // rate limit for nudges
+      const [tiltGain,setTiltGain]=useLocalStorage("ra.tiltGain", 0.20);
+      const [tiltBeta,setTiltBeta]=useState(0);
+      const tiltZeroRef = useRef(0);
+      const lastTiltTimeRef = useRef(0);
 
       // Custom
       const [customPath,setCustomPath]=useState("/v1/arm/move");
@@ -245,8 +246,15 @@
 
       async function stop(){ await api("POST","/v1/arm/stop",{reason:"ui stop"},{queueIfOffline:true}).catch(()=>{}); }
 
+      // Unified STOP handler (also cancels any ongoing jog repeat)
+      async function handleStop(){
+        addLog({level:'req', text:'Stop requested'});
+        stopHoldRepeat();                       // cancel any held repeats
+        setJogEnable(false);                    // release two-hand enable
+        await stop();                           // send API (queued if offline)
+      }
+
       async function nudge(name, delta, speed=60){
-        // Soft-limit check
         const cur = motors.find(m=>m.name===name)?.pos ?? 0;
         const lim = limits[name] || {min:-9999,max:9999};
         const next = cur + delta;
@@ -256,8 +264,7 @@
         }
         const joints={}; joints[name]=delta;
         await api("POST","/v1/arm/move",{mode:"relative",joints,speed},{queueIfOffline:true}).catch(()=>{});
-        // optimistic UI
-        setMotors(p=>p.map(x=>x.name===name?{...x,pos:x.pos+delta}:x));
+        setMotors(p=>p.map(x=>x.name===name?{...x,pos:x.pos+delta}:x)); // optimistic UI
       }
 
       async function refresh(){ await updatePositions(); }
@@ -273,7 +280,7 @@
         return ()=>{ clearInterval(id); document.removeEventListener("visibilitychange", onVis); };
       }, [baseUrl, apiKey]);
 
-      // ---------- Analytics from ring/logs ----------
+      // ---------- Analytics ----------
       const series = useMemo(()=>{
         const names = Object.keys(motors.reduce((acc,m)=> (acc[m.name]=1, acc), {}));
         const byName = Object.fromEntries(names.map(n=>[n, []]));
@@ -299,9 +306,8 @@
         return { successRate: (ok/total)*100, p50: percentile(latencies, 50), p95: percentile(latencies, 95) };
       }, [logs, latencies]);
 
-      // Heatmap bins
       const bins = useMemo(()=>{
-        const B=18; // ~10° bins over observed range
+        const B=18;
         const out={};
         for(const n of Object.keys(series)){
           const arr=new Array(B).fill(0);
@@ -318,20 +324,20 @@
         return out;
       }, [series]);
 
-      // Target pose angles (from taught pose)
       const targetAngles = useMemo(()=>{
         if(targetPose && taught[targetPose]) return taught[targetPose];
         return null;
       }, [targetPose, taught]);
 
-      // ---------- Jog modal logic (long-press + two-hand enable) ----------
-      function startRepeat(name, delta){
-        if(!jogEnable) return;
+      // ---------- Hold-to-repeat helpers (for ±1° buttons) ----------
+      function holdNudgeStart(name, delta){
         if(repeatRef.current) return;
         nudge(name, delta);
         repeatRef.current = setInterval(()=> nudge(name, delta), 220);
       }
-      function stopRepeat(){ if(repeatRef.current){ clearInterval(repeatRef.current); repeatRef.current=null; } }
+      function stopHoldRepeat(){
+        if(repeatRef.current){ clearInterval(repeatRef.current); repeatRef.current=null; }
+      }
 
       // ---------- Sequence runner ----------
       async function runSequence(seq){
@@ -421,7 +427,6 @@
           setTiltReady(true);
           setTiltEnabled(true);
         }catch(e){
-          // desktop/Android often don't require requestPermission
           setTiltReady(true);
           setTiltEnabled(true);
         }
@@ -432,16 +437,14 @@
         function onOrient(e){
           const b = (typeof e.beta === 'number') ? e.beta : 0; // -180..180
           setTiltBeta(b);
-          // Only nudge when: we have a jog target, the Enable button is held, and permission is ready
           if(!jogMotor || !jogEnable || !tiltReady) return;
-
-          const deflection = b - tiltZeroRef.current;                // auto-zeroed deflection
-          const scaled = clamp(deflection * tiltGain, -3, 3);        // gain scales sensitivity
-          const threshold = 0.45;                                    // deadzone
+          const deflection = b - tiltZeroRef.current;
+          const scaled = clamp(deflection * tiltGain, -3, 3);
+          const threshold = 0.45;
           const t = now();
           if(Math.abs(scaled) > threshold && (t - lastTiltTimeRef.current) > 160){
             lastTiltTimeRef.current = t;
-            const step = scaled > 0 ? 1 : -1;                        // 1° step per tick
+            const step = scaled > 0 ? 1 : -1;
             nudge(jogMotor.name, step);
           }
         }
@@ -459,9 +462,7 @@
 
       // Keyboard emergency stop
       useEffect(()=>{
-        function onKey(e){
-          if(e.key === 'Escape'){ stop(); }
-        }
+        function onKey(e){ if(e.key === 'Escape'){ handleStop(); } }
         window.addEventListener('keydown', onKey);
         return ()=>window.removeEventListener('keydown', onKey);
       }, []);
@@ -475,7 +476,7 @@
               <div className="flex items-center justify-between gap-2">
                 <h1 className="text-2xl font-semibold tracking-tight drop-shadow-sm">Lego Arm Control</h1>
                 <div className="flex items-center gap-2">
-                  {/* QR icon-only button (no label) */}
+                  {/* QR icon-only button */}
                   <button
                     className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/30 text-white flex items-center"
                     onClick={()=>setQrOpen(true)}
@@ -484,7 +485,7 @@
                   >
                     <Icon name="qr" />
                   </button>
-                  {/* Admin keeps label */}
+                  {/* Admin with label */}
                   <button className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/30 text-white flex items-center gap-2" onClick={()=>setAdminOpen(true)} aria-label="Open admin settings"><Icon name="menu" /><span>Admin</span></button>
                 </div>
               </div>
@@ -525,7 +526,7 @@
               </div>
               <div className="mt-4 grid sm:grid-cols-5 gap-3">
                 <button className="px-3 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white" onClick={()=>sendPose("home")}>Home</button>
-                <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={stop}>Stop</button>
+                <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={handleStop}>Stop</button>
                 <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={()=>checkHealth()}>Health</button>
                 <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={()=>loadInventory(true)}>Inventory</button>
                 <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={()=>refresh()}>Refresh positions</button>
@@ -717,7 +718,7 @@
               aria-label="Master Stop"
               className="rounded-full w-14 h-14 flex items-center justify-center shadow-lg border border-red-300 text-white"
               style={{background:'#ef4444'}}
-              onClick={stop}
+              onClick={handleStop}
             >
               <Icon name="stop" className="w-7 h-7" />
             </button>
@@ -767,7 +768,7 @@
           {consoleOpen && (
             <div className="fixed inset-0 z-50">
               <div className="absolute inset-0 bg-black/40" onClick={()=>setConsoleOpen(false)}></div>
-              <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-xl p-6 w-full max-w-3xl max-h-[85vh] overflow-auto">
+              <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-xl p-6 w-full max-w-3xl max-height-[85vh] max-h-[85vh] overflow-auto">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2"><Icon name="console"/><h3 className="text-lg font-semibold">Console & Timeline</h3></div>
                   <div className="flex gap-2">
@@ -857,11 +858,11 @@
           {/* Jog modal */}
           {jogMotor && (
             <div className="fixed inset-0 z-50 no-select" role="dialog" aria-modal="true" aria-labelledby="jog-title">
-              <div className="absolute inset-0 bg-black/40" onClick={()=>{ setJogMotor(null); stopRepeat(); setJogEnable(false); }}></div>
+              <div className="absolute inset-0 bg-black/40" onClick={()=>{ setJogMotor(null); stopHoldRepeat(); setJogEnable(false); }}></div>
               <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-xl p-6 w-full max-w-sm">
                 <div className="flex items-center justify-between mb-2">
                   <h3 id="jog-title" className="text-lg font-semibold">Jog {jogMotor.name}</h3>
-                  <button className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200" onClick={()=>{ setJogMotor(null); stopRepeat(); setJogEnable(false); }}>Close</button>
+                  <button className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200" onClick={()=>{ setJogMotor(null); stopHoldRepeat(); setJogEnable(false); }}>Close</button>
                 </div>
 
                 {/* Tilt indicator */}
@@ -871,24 +872,17 @@
                     <span className="font-mono">{(tiltBeta - tiltZeroRef.current).toFixed(1)}°</span>
                   </div>
                   <div className="h-3 rounded bg-slate-100 relative overflow-hidden">
-                    {/* center zero marker */}
                     <div className="absolute left-1/2 top-0 bottom-0 w-px bg-slate-300"></div>
-                    {/* live deflection bar */}
                     {(() => {
-                      const def = clamp((tiltBeta - tiltZeroRef.current), -15, 15); // show up to ±15°
-                      const pct = (def / 30) * 100; // -50..+50 around center
+                      const def = clamp((tiltBeta - tiltZeroRef.current), -15, 15);
+                      const pct = (def / 30) * 100;
                       const left = 50 + Math.min(0, pct);
                       const width = Math.abs(pct);
                       const active = jogEnable && tiltEnabled && tiltReady;
                       return (
                         <div
                           className="absolute top-0 bottom-0 rounded"
-                          style={{
-                            left: left + '%',
-                            width: width + '%',
-                            background: active ? '#2563eb' : '#94a3b8',
-                            opacity: 0.9
-                          }}
+                          style={{ left: left + '%', width: width + '%', background: active ? '#2563eb' : '#94a3b8', opacity: 0.9 }}
                         />
                       );
                     })()}
@@ -896,15 +890,15 @@
                   <div className="text-[11px] text-slate-500 mt-1">Bar grows with tilt. Auto-zero occurs when you press <span className="font-medium">Enable</span>.</div>
                 </div>
 
-                <div className="text-sm text-slate-600 mt-3">Hold <span className="font-medium">Enable</span> to jog. Use ±1° buttons for discrete steps.</div>
+                <div className="text-sm text-slate-600 mt-3">Hold <span className="font-medium">Enable</span> to jog by tilt. Use ±1° for discrete steps (no enable needed).</div>
                 <div className="flex items-center justify-between my-3">
                   <button
-                    className="px-3 py-2 rounded-xl bg-white border border-slate-200 w-24"
-                    onMouseDown={()=>startRepeat(jogMotor.name, -1)}
-                    onMouseUp={stopRepeat}
-                    onMouseLeave={stopRepeat}
-                    onTouchStart={(e)=>{e.preventDefault(); startRepeat(jogMotor.name, -1);}}
-                    onTouchEnd={stopRepeat}
+                    className="px-3 py-2 rounded-xl bg-white border border-slate-200 w-24 pressable"
+                    onPointerDown={(e)=>{ e.preventDefault(); holdNudgeStart(jogMotor.name, -1); }}
+                    onPointerUp={stopHoldRepeat}
+                    onPointerCancel={stopHoldRepeat}
+                    onPointerLeave={stopHoldRepeat}
+                    onContextMenu={(e)=>e.preventDefault()}
                   >-1°</button>
 
                   <button
@@ -920,12 +914,12 @@
                   </button>
 
                   <button
-                    className="px-3 py-2 rounded-xl bg-brand-600 text-white w-24"
-                    onMouseDown={()=>startRepeat(jogMotor.name, +1)}
-                    onMouseUp={stopRepeat}
-                    onMouseLeave={stopRepeat}
-                    onTouchStart={(e)=>{e.preventDefault(); startRepeat(jogMotor.name, +1);}}
-                    onTouchEnd={stopRepeat}
+                    className="px-3 py-2 rounded-xl bg-brand-600 text-white w-24 pressable"
+                    onPointerDown={(e)=>{ e.preventDefault(); holdNudgeStart(jogMotor.name, +1); }}
+                    onPointerUp={stopHoldRepeat}
+                    onPointerCancel={stopHoldRepeat}
+                    onPointerLeave={stopHoldRepeat}
+                    onContextMenu={(e)=>e.preventDefault()}
                   >+1°</button>
                 </div>
 
