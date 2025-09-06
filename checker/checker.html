@@ -28,22 +28,30 @@ pre{background:#111;color:#0f0;padding:12px;white-space:pre-wrap}
 <button onclick="postJson('/v1/arm/move', moveBody.value)">POST /v1/arm/move</button>
 
 <h3>Manual motor nudges</h3>
+<label>Step:
+  <select id="step">
+    <option value="10">10r</option>
+    <option value="20">20r</option>
+    <option value="50">50r</option>
+    <option value="100">100r</option>
+  </select>
+</label>
 <div id="nudges">
   <div class="nudge-row"><span>A</span><div class="btn-group">
-    <button onclick="nudge('A', -5)">-5°</button>
-    <button onclick="nudge('A', 5)">+5°</button>
+    <button class="minus" onclick="nudge('A', -step())"></button>
+    <button class="plus" onclick="nudge('A', step())"></button>
   </div></div>
   <div class="nudge-row"><span>B</span><div class="btn-group">
-    <button onclick="nudge('B', -5)">-5°</button>
-    <button onclick="nudge('B', 5)">+5°</button>
+    <button class="minus" onclick="nudge('B', -step())"></button>
+    <button class="plus" onclick="nudge('B', step())"></button>
   </div></div>
   <div class="nudge-row"><span>C</span><div class="btn-group">
-    <button onclick="nudge('C', -5)">-5°</button>
-    <button onclick="nudge('C', 5)">+5°</button>
+    <button class="minus" onclick="nudge('C', -step())"></button>
+    <button class="plus" onclick="nudge('C', step())"></button>
   </div></div>
   <div class="nudge-row"><span>D</span><div class="btn-group">
-    <button onclick="nudge('D', -5)">-5°</button>
-    <button onclick="nudge('D', 5)">+5°</button>
+    <button class="minus" onclick="nudge('D', -step())"></button>
+    <button class="plus" onclick="nudge('D', step())"></button>
   </div></div>
 </div>
 
@@ -71,8 +79,18 @@ async function call(method, path, body=null, auth=false){
 }
 function postJson(path, json){ return call('POST', path, json, true); }
 function pose(name){ return postJson('/v1/arm/pose', JSON.stringify({name, speed:60})); }
-function nudge(joint, deg){
-  const body=JSON.stringify({mode:"relative", joints:{[joint]:deg}, speed:40});
+function step(){
+  return parseInt(document.getElementById('step').value) || 10;
+}
+function updateNudgeLabels(){
+  const s=step();
+  document.querySelectorAll('#nudges .minus').forEach(b=>b.textContent=`-${s}r`);
+  document.querySelectorAll('#nudges .plus').forEach(b=>b.textContent=`+${s}r`);
+}
+document.getElementById('step').addEventListener('change', updateNudgeLabels);
+updateNudgeLabels();
+function nudge(joint, rot){
+  const body=JSON.stringify({mode:"relative", joints:{[joint]:rot}, speed:40, units:"rotations"});
   return postJson('/v1/arm/move', body);
 }
 const moveBody=document.getElementById('moveBody');
