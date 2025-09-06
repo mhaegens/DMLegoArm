@@ -201,7 +201,11 @@ def json_response(handler: BaseHTTPRequestHandler, payload: dict, status: int = 
     handler.send_header("Access-Control-Allow-Methods", "*")
     handler.send_header("Access-Control-Allow-Headers", "*")
     handler.end_headers()
-    handler.wfile.write(body)
+    try:
+        handler.wfile.write(body)
+    except BrokenPipeError:
+        # Client closed connection before we could reply; ignore
+        pass
 
 
 def parse_json(handler: BaseHTTPRequestHandler):
@@ -317,7 +321,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except BrokenPipeError:
+                pass
         except FileNotFoundError:
             json_response(self, {"ok": False, "error": {"code": "UI_MISSING", "message": "UI not found"}}, 500)
 
@@ -330,7 +337,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", ctype or "application/octet-stream")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except BrokenPipeError:
+                pass
         except FileNotFoundError:
             return json_response(self, {"ok": False, "error": {"code": "NOT_FOUND", "message": "Unknown path"}}, 404)
 
