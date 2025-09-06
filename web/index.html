@@ -176,24 +176,27 @@
         return h;
       };
 
-      async function api(method, path, body, {timeoutMs=8000, queueIfOffline=false}={}){
-        if(!baseUrl){ addLog({level:"err",text:"Base URL not set"}); throw new Error("Base URL not set"); }
+      async function api(method, path, body, {timeoutMs=8000, queueIfOffline=false, log=true}={}){
+        if(!baseUrl){
+          if(log) addLog({level:"err",text:"Base URL not set"});
+          throw new Error("Base URL not set");
+        }
         const url = join(baseUrl, path);
         if(queueIfOffline && !connected){
           const item={method,path,body,ts:now()}; setOfflineQueue(q=>[...q,item]);
-          addLog({level:"ok",text:"Queued (offline): "+method+" "+url, body});
+          if(log) addLog({level:"ok",text:"Queued (offline): "+method+" "+url, body});
           return null;
         }
         const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(), timeoutMs);
         const opts={method, headers:headers(), signal:ctrl.signal};
         if(body!==undefined) opts.body=JSON.stringify(body);
-        addLog({level:"req",text:`${method} ${url}`,body});
+        if(log) addLog({level:"req",text:`${method} ${url}`,body});
         const t0=performance.now();
         try{
           const res=await fetch(url, opts);
           const elapsed=Math.round(performance.now()-t0);
           const txt=await res.text(); let data=null; try{ data = txt ? JSON.parse(txt) : null; } catch {}
-          addLog({level:res.ok?"ok":"err", text:`${res.status} ${res.statusText} (${elapsed}ms)`, body:data??txt, ms:elapsed});
+          if(log) addLog({level:res.ok?"ok":"err", text:`${res.status} ${res.statusText} (${elapsed}ms)", body:data??txt, ms:elapsed});
           if(!res.ok) throw new Error("HTTP "+res.status);
           return data?.data ?? data;
         } finally { clearTimeout(t); }
@@ -208,7 +211,7 @@
 
       // Health & state polling
       async function checkHealth(){
-        try{ await api("GET","/v1/health"); setConnected(true); }
+        try{ await api("GET","/v1/health", undefined, {log:false}); setConnected(true); }
         catch{ setConnected(false); }
       }
 
@@ -216,7 +219,7 @@
         if(polling.current) return;
         polling.current = true;
         try{
-          const s = await api("GET","/v1/arm/state").catch(()=>null);
+          const s = await api("GET","/v1/arm/state", undefined, {log:false}).catch(()=>null);
           if(s?.abs_degrees){
             const ordered = Object.entries(s.abs_degrees)
               .map(([k,v])=>({name:k,pos:+v}))
