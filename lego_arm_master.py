@@ -37,6 +37,8 @@ except Exception:
             self._pos += degrees
             if blocking:
                 time.sleep(min(abs(degrees) / 360.0, 0.2))
+        def run_for_rotations(self, rotations: float, speed: int = 50, blocking: bool = True):
+            self.run_for_degrees(rotations * 360.0, speed, blocking)
         def stop(self):
             pass
         def get_degrees(self):
@@ -71,17 +73,22 @@ class ArmController:
         for m in self.motors.values():
             m.stop()
 
-    def move(self, mode: Literal["relative", "absolute"], joints: Dict[str, float], speed: int, timeout_s: Optional[float] = None):
+    def move(self, mode: Literal["relative", "absolute"], joints: Dict[str, float], speed: int,
+             timeout_s: Optional[float] = None, units: Literal["degrees", "rotations"] = "degrees"):
         start = time.time()
         with self.lock:
+            joints_deg = {j: (deg * 360.0 if units == "rotations" else deg) for j, deg in joints.items()}
             if mode == "relative":
-                plan = {j: self.clamp(j, self.current_abs[j] + deg) - self.current_abs[j] for j, deg in joints.items()}
+                plan = {j: self.clamp(j, self.current_abs[j] + deg) - self.current_abs[j] for j, deg in joints_deg.items()}
             else:
-                plan = {j: self.clamp(j, deg) - self.current_abs[j] for j, deg in joints.items()}
+                plan = {j: self.clamp(j, deg) - self.current_abs[j] for j, deg in joints_deg.items()}
             for j, delta in plan.items():
                 if abs(delta) < 1e-6:
                     continue
-                self.motors[j].run_for_degrees(delta, speed=speed, blocking=True)
+                if units == "rotations":
+                    self.motors[j].run_for_rotations(delta / 360.0, speed=speed, blocking=True)
+                else:
+                    self.motors[j].run_for_degrees(delta, speed=speed, blocking=True)
                 self.current_abs[j] += delta
                 if timeout_s and time.time() - start > timeout_s:
                     raise TimeoutError("Movement timed out")
@@ -153,7 +160,13 @@ def worker():
             kind = op["type"]
             req = op["request"]
             if kind == "move":
-                res = arm.move(req.get("mode", "relative"), req["joints"], int(req.get("speed", 60)), req.get("timeout_s"))
+                res = arm.move(
+                    req.get("mode", "relative"),
+                    req["joints"],
+                    int(req.get("speed", 60)),
+                    req.get("timeout_s"),
+                    req.get("units", "degrees"),
+                )
             elif kind == "pose":
                 res = arm.goto_pose(req["name"], int(req.get("speed", 60)))
             elif kind == "pickplace":
@@ -353,6 +366,7 @@ class Handler(BaseHTTPRequestHandler):
                 joints = body.get("joints") or {}
                 speed = int(body.get("speed", 60))
                 timeout_s = body.get("timeout_s", 30)
+                units = body.get("units", "degrees")
                 async_exec = bool(body.get("async_exec", False))
                 if not isinstance(joints, dict) or not joints:
                     return json_response(self, {"ok": False, "error": {"code": "BAD_MOVE", "message": "Provide joints map"}}, 400)
@@ -370,7 +384,7 @@ class Handler(BaseHTTPRequestHandler):
                     resp = {"ok": True, "data": {"operation_id": op["id"], "status": op["status"]}}
                     idem_store(self, resp)
                     return json_response(self, resp)
-                res = arm.move(mode, joints, speed, timeout_s)
+                res = arm.move(mode, joints, speed, timeout_s, units)
                 resp = {"ok": True, "data": res}
                 idem_store(self, resp)
                 return json_response(self, resp)

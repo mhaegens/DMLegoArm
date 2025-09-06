@@ -234,7 +234,7 @@ curl -X POST https://<ngrok>/v1/arm/pose \
 
 ### `POST /v1/arm/move`  *(auth)*
 
-Relative or absolute joint moves (`A/B/C/D` in **degrees**).
+Relative or absolute joint moves (`A/B/C/D` in **degrees** by default). Use `"units":"rotations"` to specify counts of full rotations instead.
 
 ```json
 {
@@ -242,6 +242,7 @@ Relative or absolute joint moves (`A/B/C/D` in **degrees**).
   "joints": { "A": 10, "B": -5 },    // at least one joint
   "speed": 60,                       // 1..100
   "timeout_s": 30,                   // optional
+  "units": "degrees",               // or "rotations"
   "async_exec": false                // true -> returns operation_id
 }
 ```
@@ -302,7 +303,7 @@ Create buttons that call the service:
 
 * **Health** – GET `/v1/health` (no body)
 * **Home** – POST `/v1/arm/pose` body `{"name":"home","speed":60}`
-* **Nudge** – POST `/v1/arm/move` body `{"mode":"relative","joints":{"A":10},"speed":40}`
+* **Nudge** – POST `/v1/arm/move` body `{"mode":"relative","units":"rotations","joints":{"A":10},"speed":40}`
 * **Pick Left** – POST `/v1/arm/pickplace` body `{"location":"left","action":"pick","speed":50}`
 * **Stop** – POST `/v1/arm/stop` body `{"reason":"operator stop"}`
 
