@@ -50,6 +50,14 @@ sudo usermod -aG dialout,gpio,i2c $USER
 sudo reboot
 ```
 
+### Motor self-test
+
+Run a quick local check to verify that all four motors respond:
+
+```bash
+USE_FAKE_MOTORS=1 python3 motor_selftest.py  # remove USE_FAKE_MOTORS for real hardware
+```
+
 ---
 
 ## Software layout
