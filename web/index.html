@@ -42,6 +42,7 @@
       while (s2.startsWith('/')) s2 = s2.slice(1);
       return s1 + '/' + s2;
     };
+    const normalizeDeg = deg => ((deg + 180) % 360 + 360) % 360 - 180;
     const MOTOR_ORDER = ["A","B","C","D","E","F"];
 
     function useLocalStorage(key, initial){
@@ -250,7 +251,7 @@
           const s = await api("GET","/v1/arm/state", undefined, {log:false}).catch(()=>null);
           if(s?.abs_degrees){
             const ordered = Object.entries(s.abs_degrees)
-              .map(([k,v])=>({name:k,pos:+v}))
+              .map(([k,v])=>({name:k,pos:normalizeDeg(+v)}))
               .sort((a,b)=>MOTOR_ORDER.indexOf(a.name)-MOTOR_ORDER.indexOf(b.name))
               .map((m,i)=>({id:i+1,...m}));
             setMotors(ordered);
@@ -292,16 +293,16 @@
 
       // Degrees-based nudge
       async function nudge(name, deltaDeg, speed=60){
-        const cur = motors.find(m=>m.name===name)?.pos ?? 0;
+        const cur = normalizeDeg(motors.find(m=>m.name===name)?.pos ?? 0);
         const lim = limits[name] || {min:-9999,max:9999};
-        const next = cur + deltaDeg;
+        const next = normalizeDeg(cur + deltaDeg);
         if(next < lim.min || next > lim.max){
           addLog({level:"err", text:`Soft limit ${name}: ${next.toFixed(1)}° out of [${lim.min}, ${lim.max}]`});
           return;
         }
         const joints={}; joints[name]=deltaDeg;
         await api("POST","/v1/arm/move",{mode:"relative",joints,speed},{queueIfOffline:true}).catch(()=>{});
-        setMotors(p=>p.map(x=>x.name===name?{...x,pos:x.pos+deltaDeg}:x));
+        setMotors(p=>p.map(x=>x.name===name?{...x,pos:normalizeDeg(x.pos+deltaDeg)}:x));
       }
 
       async function refresh(){ await updatePositions(); }
