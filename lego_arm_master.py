@@ -75,6 +75,7 @@ class ArmController:
             "D": None,
         }
         self.lock = threading.Lock()
+        self.stop_event = threading.Event()
 
     def clamp(self, joint: str, value: float) -> float:
         limits = self.limits.get(joint)
@@ -84,8 +85,12 @@ class ArmController:
         return max(lo, min(hi, value))
 
     def stop_all(self):
+        self.stop_event.set()
         for m in self.motors.values():
-            m.stop()
+            try:
+                m.stop()
+            except Exception:
+                pass
 
     def coast(self, motors: Optional[list[str]] = None, enable: bool = True):
         targets = motors or list(self.motors.keys())
@@ -123,21 +128,31 @@ class ArmController:
              timeout_s: Optional[float] = None, units: Literal["degrees", "rotations"] = "degrees"):
         start = time.time()
         with self.lock:
+            if self.stop_event.is_set():
+                self.stop_event.clear()
+                raise InterruptedError("Movement interrupted")
             joints_deg = {j: (deg * 360.0 if units == "rotations" else deg) for j, deg in joints.items()}
             if mode == "relative":
                 plan = {j: self.clamp(j, self.current_abs[j] + deg) - self.current_abs[j] for j, deg in joints_deg.items()}
             else:
                 plan = {j: self.clamp(j, deg) - self.current_abs[j] for j, deg in joints_deg.items()}
             for j, delta in plan.items():
+                if self.stop_event.is_set():
+                    self.stop_event.clear()
+                    raise InterruptedError("Movement interrupted")
                 if abs(delta) < 1e-6:
                     continue
                 if units == "rotations":
                     self.motors[j].run_for_rotations(delta / 360.0, speed=speed, blocking=True)
                 else:
                     self.motors[j].run_for_degrees(delta, speed=speed, blocking=True)
+                if self.stop_event.is_set():
+                    self.stop_event.clear()
+                    raise InterruptedError("Movement interrupted")
                 self.current_abs[j] += delta
                 if timeout_s and time.time() - start > timeout_s:
                     raise TimeoutError("Movement timed out")
+            self.stop_event.clear()
         return {"new_abs": self.current_abs.copy()}
 
     def goto_pose(self, name: str, speed: int):
