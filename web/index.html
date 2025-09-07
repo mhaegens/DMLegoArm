@@ -1,4 +1,4 @@
-<!-- Robot Arm Control v4.2.4 -->
+<!-- Robot Arm Control v4.2.5 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -70,6 +70,7 @@
       target:<svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="8" strokeWidth="2"/><circle cx="12" cy="12" r="2" strokeWidth="2"/></svg>,
       stop:<svg className={className} viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>,
       dl:  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" d="M12 3v12m0 0l-4-4m4 4 4-4M4 21h16"/></svg>,
+      tune:<svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" d="M4 6h10M14 6v10M4 18h16M8 18V8M18 6v8"/></svg>,
     }[name] || <span/>);
 
     const MotorPill = ({children}) => (
@@ -112,10 +113,10 @@
 
       // Core state
       const [connected,setConnected]=useState(false);
-        const [motors, setMotors] = useLocalStorage(
+      const [motors, setMotors] = useLocalStorage(
         "ra.motors",
         ["A","B","C","D"].map((n, i) => ({ id: i + 1, name: n, pos: 0 }))
-        );
+      );
       const [logs,setLogs]=useLocalStorage("ra.logs",[]);
       const [inventory,setInventory]=useState(null);
       const [inventoryOpen,setInventoryOpen]=useState(false);
@@ -158,7 +159,7 @@
       const [customPath,setCustomPath]=useState("/v1/arm/move");
       const [customMethod,setCustomMethod]=useState("POST");
       const [customBody,setCustomBody]=useState('{"mode":"relative","joints":{"A":10},"speed":40}');
-      const [step,setStep]=useLocalStorage("ra.step",10);
+      const [step,setStep]=useLocalStorage("ra.step",5);
 
       const polling = useRef(false);
       const alive = useRef(true);
@@ -196,7 +197,7 @@
           const res=await fetch(url, opts);
           const elapsed=Math.round(performance.now()-t0);
           const txt=await res.text(); let data=null; try{ data = txt ? JSON.parse(txt) : null; } catch {}
-          if(log) addLog({level:res.ok?"ok":"err", text:`${res.status} ${res.statusText} (${elapsed}ms)", body:data??txt, ms:elapsed});
+          if(log) addLog({level:res.ok?"ok":"err", text:`${res.status} ${res.statusText} (${elapsed}ms)`, body:(data??txt), ms:elapsed});
           if(!res.ok) throw new Error("HTTP "+res.status);
           return data?.data ?? data;
         } finally { clearTimeout(t); }
@@ -257,21 +258,42 @@
         await stop();                           // send API (queued if offline)
       }
 
-      async function nudge(name, rot, speed=60){
-        const delta=rot*360;
+      // Degrees-based nudge (positive = +deg, negative = -deg)
+      async function nudge(name, deltaDeg, speed=60){
         const cur = motors.find(m=>m.name===name)?.pos ?? 0;
         const lim = limits[name] || {min:-9999,max:9999};
-        const next = cur + delta;
+        const next = cur + deltaDeg;
         if(next < lim.min || next > lim.max){
           addLog({level:"err", text:`Soft limit ${name}: ${next.toFixed(1)}° out of [${lim.min}, ${lim.max}]`});
           return;
         }
-        const joints={}; joints[name]=rot;
-        await api("POST","/v1/arm/move",{mode:"relative",joints,speed,units:"rotations"},{queueIfOffline:true}).catch(()=>{});
-        setMotors(p=>p.map(x=>x.name===name?{...x,pos:x.pos+delta}:x)); // optimistic UI
+        const joints={}; joints[name]=deltaDeg;
+        await api("POST","/v1/arm/move",{mode:"relative",joints,speed},{queueIfOffline:true}).catch(()=>{});
+        // optimistic UI
+        setMotors(p=>p.map(x=>x.name===name?{...x,pos:x.pos+deltaDeg}:x));
       }
 
       async function refresh(){ await updatePositions(); }
+
+      // Simple tuner (kept from earlier versions so button works)
+      async function runTuner({joint="A", amplitude=5, speeds=[20,40,60,80], settleMs=350}){
+        const results=[];
+        for(const sp of speeds){
+          const before = motors.find(m=>m.name===joint)?.pos ?? 0;
+          await nudge(joint, amplitude, sp);
+          await new Promise(res=>setTimeout(res, settleMs));
+          await refresh();
+          const peak = motors.find(m=>m.name===joint)?.pos ?? before;
+          await nudge(joint, -amplitude, sp);
+          await new Promise(res=>setTimeout(res, settleMs));
+          await refresh();
+          const after = motors.find(m=>m.name===joint)?.pos ?? before;
+          const forwardErr = Math.abs((before+amplitude) - peak);
+          const returnErr  = Math.abs(before - after);
+          results.push({speed:sp, forwardErr, returnErr});
+        }
+        return results;
+      }
 
       // Polling intervals & tab visibility
       useEffect(()=>{ checkHealth(); const id=setInterval(checkHealth,15000); return ()=>clearInterval(id); }, [baseUrl, apiKey]);
@@ -448,7 +470,7 @@
           const t = now();
           if(Math.abs(scaled) > threshold && (t - lastTiltTimeRef.current) > 160){
             lastTiltTimeRef.current = t;
-            const step = scaled > 0 ? 1 : -1;
+            const step = scaled > 0 ? 1 : -1; // 1° nudge per tick
             nudge(jogMotor.name, step);
           }
         }
@@ -598,8 +620,8 @@
                 <h2 className="text-slate-800 font-semibold">Nudge controls</h2>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-slate-600">Step</span>
-                  <select className="px-3 py-2 rounded-xl bg-white border border-slate-200" value={step} onChange={e=>window.localStorage.setItem('ra.step', JSON.stringify(parseInt(e.target.value)||10)) || location.reload()}>
-                    <option value="10">10r</option><option value="20">20r</option><option value="50">50r</option><option value="100">100r</option>
+                  <select className="px-3 py-2 rounded-xl bg-white border border-slate-200" value={step} onChange={e=>window.localStorage.setItem('ra.step', JSON.stringify(parseInt(e.target.value)||5)) || location.reload()}>
+                    <option value="1">1°</option><option value="2">2°</option><option value="5">5°</option><option value="10">10°</option>
                   </select>
                 </div>
               </div>
@@ -611,9 +633,9 @@
                       <div className="text-sm text-slate-500">{Math.round(m.pos)}°</div>
                     </div>
                     <div className="mt-3 flex gap-2">
-                      <button className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 w-full" onClick={()=>nudge(m.name,-(step||10))}>-{step||10}r</button>
-                      <button className="px-3 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white w-full" onClick={()=>nudge(m.name,(step||10))}>+{step||10}r</button>
-                      <button className="px-3 py-2 rounded-xl bg-slate-800 text-white w-14" title="Jog with tilt" onClick={()=>setJogMotor(m)}>J</button>
+                      <button className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 w-full" onClick={()=>nudge(m.name,-(step||5))}>-{step||5}°</button>
+                      <button className="px-3 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white w-full" onClick={()=>nudge(m.name,(step||5))}>+{step||5}°</button>
+                      <button className="px-3 py-2 rounded-xl bg-slate-800 text-white w-14 pressable" title="Jog with tilt" onClick={()=>setJogMotor(m)}>J</button>
                     </div>
                   </div>
                 ))}
@@ -642,7 +664,7 @@
                       </div>
                       <div className="mt-2 flex gap-2">
                         <button className="px-3 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white" onClick={()=>runSequence(seq)}><Icon name="play"/> Run</button>
-                        <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={()=>dryRun(seq)}><Icon name="target"/> Dry run</button>
+                        <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={()=>dryRun(seq)}><Icon name="tune"/> Dry run</button>
                       </div>
                     </div>
                   ))}
@@ -772,7 +794,7 @@
           {consoleOpen && (
             <div className="fixed inset-0 z-50">
               <div className="absolute inset-0 bg-black/40" onClick={()=>setConsoleOpen(false)}></div>
-              <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-xl p-6 w-full max-w-3xl max-height-[85vh] max-h-[85vh] overflow-auto">
+              <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-xl p-6 w-full max-w-3xl max-h-[85vh] overflow-auto">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2"><Icon name="console"/><h3 className="text-lg font-semibold">Console & Timeline</h3></div>
                   <div className="flex gap-2">
@@ -898,7 +920,7 @@
                 <div className="flex items-center justify-between my-3">
                   <button
                     className="px-3 py-2 rounded-xl bg-white border border-slate-200 w-24 pressable"
-                    onPointerDown={(e)=>{ e.preventDefault(); holdNudgeStart(jogMotor.name, -1/360); }}
+                    onPointerDown={(e)=>{ e.preventDefault(); holdNudgeStart(jogMotor.name, -1); }}
                     onPointerUp={stopHoldRepeat}
                     onPointerCancel={stopHoldRepeat}
                     onPointerLeave={stopHoldRepeat}
@@ -919,7 +941,7 @@
 
                   <button
                     className="px-3 py-2 rounded-xl bg-brand-600 text-white w-24 pressable"
-                    onPointerDown={(e)=>{ e.preventDefault(); holdNudgeStart(jogMotor.name, +1/360); }}
+                    onPointerDown={(e)=>{ e.preventDefault(); holdNudgeStart(jogMotor.name, +1); }}
                     onPointerUp={stopHoldRepeat}
                     onPointerCancel={stopHoldRepeat}
                     onPointerLeave={stopHoldRepeat}
