@@ -28,7 +28,7 @@ except Exception:
             self.run_for_degrees(rotations * 360.0, speed, blocking)
         def stop(self):
             pass
-        def get_degrees(self):
+        def get_position(self):
             return self._pos
 
 PORTS = ["A", "B", "C", "D"]
@@ -36,11 +36,11 @@ PORTS = ["A", "B", "C", "D"]
 
 def test_motor(port: str) -> Dict[str, float]:
     m = Motor(port)
-    start = m.get_degrees()
+    start = m.get_position()
     m.run_for_degrees(90, speed=50)
-    mid = m.get_degrees()
+    mid = m.get_position()
     m.run_for_degrees(-90, speed=50)
-    end = m.get_degrees()
+    end = m.get_position()
     ok = abs(end - start) < 1e-6
     return {"start": start, "mid": mid, "end": end, "ok": ok}
 
