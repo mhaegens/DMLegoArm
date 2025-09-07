@@ -110,7 +110,6 @@ Set through environment variables (systemd or shell):
 | `USE_FAKE_MOTORS`     | No       | `0`     | `1` to simulate motors (dev/demo without Build HAT).              |
 | `ALLOW_NO_AUTH_LOCAL` | No       | `0`     | `1` to skip API key for localhost clients only (dev convenience). |
 | `ARM_BACKLASH_<PORT>` | No       | `0`     | Degrees added on direction change for motor `<PORT>` to take up gear slack (e.g. `ARM_BACKLASH_D=2160` for six rotations). Values persist in `arm_calibration.json` and can be updated via `POST /v1/arm/backlash`. |
-
 ---
 
 ## Run it (quick start)
