@@ -1,4 +1,4 @@
-<!-- Robot Arm Control v4.2.5 -->
+<!-- Robot Arm Control v4.2.6 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -73,8 +73,10 @@
       tune:<svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" d="M4 6h10M14 6v10M4 18h16M8 18V8M18 6v8"/></svg>,
     }[name] || <span/>);
 
-    const MotorPill = ({children}) => (
-      <div className="glass inline-flex items-center gap-1 px-2 py-1 rounded-full text-white text-[11px]">{children}</div>
+    const MotorPill = ({children, onClick}) => (
+      <button onClick={onClick} className="glass inline-flex items-center gap-1 px-2 py-1 rounded-full text-white text-[11px] hover:bg-white/25 active:scale-[0.98] transition no-select">
+        {children}
+      </button>
     );
 
     const Sparkline = ({data, width=80, height=20, padding=2}) => {
@@ -124,6 +126,10 @@
       const [qrOpen,setQrOpen]=useState(false);
       const [consoleOpen,setConsoleOpen]=useState(false);
 
+      // Pill action menu (J/C/B) state
+      const [pillMenu,setPillMenu]=useState({open:false, motor:null, x:0, y:0});
+      const pillMenuRef = useRef(null);
+
       // Ring buffer (2 min)
       const RING_MS = 120000;
       const [ring,setRing]=useLocalStorage("ra.ring", []);
@@ -164,7 +170,7 @@
       const [customPath,setCustomPath]=useState("/v1/arm/move");
       const [customMethod,setCustomMethod]=useState("POST");
       const [customBody,setCustomBody]=useState('{"mode":"relative","joints":{"A":10},"speed":40}');
-      const [nudgeUnit,setNudgeUnit]=useLocalStorage("ra.nudgeUnit","rot");
+      const [nudgeUnit,setNudgeUnit]=useLocalStorage("ra.nudgeUnit","deg"); // 'deg' or 'rot'
       const [stepDeg,setStepDeg]=useLocalStorage("ra.stepDeg",5);
       const [stepRotRaw,setStepRotRaw]=useLocalStorage("ra.stepRot","1,0");
       const stepRotStr = String(stepRotRaw).replace('.', ',');
@@ -174,6 +180,17 @@
       const polling = useRef(false);
       const alive = useRef(true);
       useEffect(()=>()=>{ alive.current=false; },[]);
+
+      // Pill menu outside click close
+      useEffect(()=>{
+        function onDocClick(e){
+          if(!pillMenu.open) return;
+          const el = pillMenuRef.current;
+          if(el && !el.contains(e.target)){ setPillMenu({open:false, motor:null, x:0, y:0}); }
+        }
+        document.addEventListener('mousedown', onDocClick);
+        return ()=>document.removeEventListener('mousedown', onDocClick);
+      }, [pillMenu.open]);
 
       // --------- Logging helpers ---------
       const addLog = (e) => {
@@ -266,15 +283,14 @@
 
       async function stop(){ await api("POST","/v1/arm/stop",{reason:"ui stop"},{queueIfOffline:true}).catch(()=>{}); }
 
-      // Unified STOP handler (also cancels any ongoing jog repeat)
       async function handleStop(){
         addLog({level:'req', text:'Stop requested'});
-        stopHoldRepeat();                       // cancel any held repeats
-        setJogEnable(false);                    // release two-hand enable
-        await stop();                           // send API (queued if offline)
+        stopHoldRepeat();
+        setJogEnable(false);
+        await stop();
       }
 
-      // Degrees-based nudge (positive = +deg, negative = -deg)
+      // Degrees-based nudge
       async function nudge(name, deltaDeg, speed=60){
         const cur = motors.find(m=>m.name===name)?.pos ?? 0;
         const lim = limits[name] || {min:-9999,max:9999};
@@ -285,13 +301,11 @@
         }
         const joints={}; joints[name]=deltaDeg;
         await api("POST","/v1/arm/move",{mode:"relative",joints,speed},{queueIfOffline:true}).catch(()=>{});
-        // optimistic UI
         setMotors(p=>p.map(x=>x.name===name?{...x,pos:x.pos+deltaDeg}:x));
       }
 
       async function refresh(){ await updatePositions(); }
 
-      // Simple tuner (kept from earlier versions so button works)
       async function runTuner({joint="A", amplitude=5, speeds=[20,40,60,80], settleMs=350}){
         const results=[];
         for(const sp of speeds){
@@ -533,22 +547,54 @@
               </div>
             </div>
 
-            {/* Hero & stacked motor pills */}
+            {/* Hero & stacked motor pills (click pill to open J/C/B menu) */}
             <div className="relative max-w-6xl mx-auto px-4 sm:px-6 h-[18rem] sm:h-[22rem]">
               <img src="robot-arm.png" alt="Robot Arm" className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-[20%] pointer-events-none select-none max-h-[20rem] sm:max-h-[24rem] drop-shadow-[0_16px_36px_rgba(31,144,255,0.55)]" />
               <div className="absolute right-4 sm:right-6 top-1/2 -translate-y-1/2 flex flex-col gap-2 items-end">
                 {motors.map(m => (
-                  <MotorPill key={m.id}>
+                  <MotorPill
+                    key={m.id}
+                    onClick={(e)=>{
+                      const r = e.currentTarget.getBoundingClientRect();
+                      setPillMenu({open:true, motor:m, x:r.left, y:r.bottom + 6});
+                    }}
+                  >
                     <span className="font-semibold">{m.name}</span>
-                    <span className="opacity-90 ml-0.5">{nudgeUnit==='deg' ? Math.round(m.pos)+'°' : (m.pos/360).toLocaleString('de-DE',{minimumFractionDigits:1,maximumFractionDigits:2})+'r'}</span>
-                    <button className="ml-1 px-1 py-0.5 rounded bg-white/20 hover:bg-white/30" title="Jog" onClick={()=>setJogMotor(m)}>J</button>
-                    <button className="ml-1 px-1 py-0.5 rounded bg-white/20 hover:bg-white/30" title="Coast" onClick={()=>sendCoast(m.name,true)}>C</button>
-                    <button className="ml-1 px-1 py-0.5 rounded bg-white/20 hover:bg-white/30" title="Brake" onClick={()=>sendCoast(m.name,false)}>B</button>
+                    <span className="opacity-90 ml-0.5">
+                      {nudgeUnit==='deg'
+                        ? Math.round(m.pos)+'°'
+                        : (m.pos/360).toLocaleString('de-DE',{minimumFractionDigits:1,maximumFractionDigits:2})+'r'}
+                    </span>
                   </MotorPill>
                 ))}
               </div>
             </div>
           </header>
+
+          {/* Pill action popover (J / C / B) */}
+          {pillMenu.open && pillMenu.motor && (
+            <div
+              ref={pillMenuRef}
+              className="fixed z-50 bg-white rounded-xl shadow-xl border border-slate-200 p-2 flex items-center gap-2"
+              style={{left: pillMenu.x + 'px', top: pillMenu.y + 'px'}}
+            >
+              <button
+                className="px-2 py-1 rounded bg-slate-800 text-white text-xs"
+                onClick={()=>{ setJogMotor(pillMenu.motor); setPillMenu({open:false, motor:null, x:0, y:0}); }}
+                title="Jog"
+              >J</button>
+              <button
+                className="px-2 py-1 rounded bg-white border text-xs"
+                onClick={()=>{ sendCoast(pillMenu.motor.name, true); setPillMenu({open:false, motor:null, x:0, y:0}); }}
+                title="Coast"
+              >C</button>
+              <button
+                className="px-2 py-1 rounded bg-white border text-xs"
+                onClick={()=>{ sendCoast(pillMenu.motor.name, false); setPillMenu({open:false, motor:null, x:0, y:0}); }}
+                title="Brake"
+              >B</button>
+            </div>
+          )}
 
           {/* Status + actions row */}
           <div className="max-w-6xl mx-auto px-4 sm:px-6 mt-6 relative z-10 flex items-center gap-3 flex-wrap">
@@ -608,7 +654,11 @@
                     <div key={m.name} className="border rounded-2xl p-3">
                       <div className="flex items-center justify-between">
                         <div className="font-semibold">{m.name}</div>
-                        <div className="text-sm text-slate-500">{nudgeUnit==='deg' ? Math.round(m.pos)+'°' : (m.pos/360).toLocaleString('de-DE',{minimumFractionDigits:1,maximumFractionDigits:2})+'r'}</div>
+                        <div className="text-sm text-slate-500">
+                          {nudgeUnit==='deg'
+                            ? Math.round(m.pos)+'°'
+                            : (m.pos/360).toLocaleString('de-DE',{minimumFractionDigits:1,maximumFractionDigits:2})+'r'}
+                        </div>
                       </div>
                       <div className="mt-2 flex items-center justify-between">
                         <div className="text-xs text-slate-600">dθ/dt: {dtheta.toFixed(2)}°/s</div>
@@ -664,7 +714,11 @@
                   <div key={m.id} className="border rounded-2xl p-4">
                     <div className="flex items-center justify-between">
                       <div className="font-semibold">{m.name}</div>
-                      <div className="text-sm text-slate-500">{nudgeUnit==='deg' ? Math.round(m.pos)+'°' : (m.pos/360).toLocaleString('de-DE',{minimumFractionDigits:1,maximumFractionDigits:2})+'r'}</div>
+                      <div className="text-sm text-slate-500">
+                        {nudgeUnit==='deg'
+                          ? Math.round(m.pos)+'°'
+                          : (m.pos/360).toLocaleString('de-DE',{minimumFractionDigits:1,maximumFractionDigits:2})+'r'}
+                      </div>
                     </div>
                     <div className="mt-3 flex gap-2">
                       <button className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 w-full"
