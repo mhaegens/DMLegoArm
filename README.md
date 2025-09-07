@@ -109,8 +109,7 @@ Set through environment variables (systemd or shell):
 | `PORT`                | No       | `8000`  | Local listen port.                                                |
 | `USE_FAKE_MOTORS`     | No       | `0`     | `1` to simulate motors (dev/demo without Build HAT).              |
 | `ALLOW_NO_AUTH_LOCAL` | No       | `0`     | `1` to skip API key for localhost clients only (dev convenience). |
-| `ARM_BACKLASH_<PORT>` | No       | `0`     | Degrees added on direction change for motor `<PORT>` to take up gear slack (e.g. `ARM_BACKLASH_D=2160` for six rotations). |
-
+| `ARM_BACKLASH_<PORT>` | No       | `0`     | Degrees added on direction change for motor `<PORT>` to take up gear slack (e.g. `ARM_BACKLASH_D=2160` for six rotations). Values persist in `arm_calibration.json` and can be updated via `POST /v1/arm/backlash`. |
 ---
 
 ## Run it (quick start)
@@ -218,7 +217,7 @@ Lists available endpoints, poses, motors.
 
 ### `GET /v1/arm/state`  *(auth)*
 
-Returns current absolute degrees and software limits.
+Returns current absolute degrees, software limits, motors and backlash calibration.
 
 ```json
 {
@@ -226,9 +225,26 @@ Returns current absolute degrees and software limits.
   "data": {
     "abs_degrees": {"A": 0, "B": 0, "C": 0, "D": 0},
     "limits": {"A": [-360,360], "B": [-180,180], "C": [-180,180], "D": [-90,90]},
-    "motors": ["A","B","C","D"]
+    "motors": ["A","B","C","D"],
+    "backlash": {"A":0,"B":0,"C":0,"D":0}
   }
 }
+```
+
+### `GET /v1/arm/backlash`  *(auth)*
+
+Returns the persisted backlash calibration in degrees for each motor.
+
+```json
+{ "A": 0, "B": 0, "C": 0, "D": 2160 }
+```
+
+### `POST /v1/arm/backlash`  *(auth)*
+
+Update backlash calibration; values are saved to `arm_calibration.json` and applied to subsequent moves.
+
+```json
+{ "A": 10, "D": 2160 }
 ```
 
 ### `POST /v1/arm/pose`  *(auth)*
