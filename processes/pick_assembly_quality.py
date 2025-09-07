@@ -29,4 +29,3 @@ def run(arm) -> Any:
     for pose in steps:
         result = arm.move("absolute", pose, speed=speed, units="rotations")
     return result
-
