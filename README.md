@@ -9,7 +9,7 @@ This README documents the **final architecture** we shipped, why we chose it, ho
 ## At a glance
 
 * **Single file server**: `lego_arm_master.py` (Python standard library only; no pip installs)
-* **Endpoints**: `/v1/*` (health, state, move, pose, pick/place, stop, async ops, production processes)
+* **Endpoints**: `/v1/*` (health, state, move, pose, pick/place, stop, coast, async ops, production processes)
 * **Auth**: API key in header `x-api-key`
 * **Idempotency**: `X-Idempotency-Key` (in-memory cache; 5-minute TTL)
 * **Async**: Background worker + `GET /v1/operations/{id}`
@@ -271,6 +271,16 @@ Stops all motors immediately.
 { "reason": "operator stop" }
 ```
 
+### `POST /v1/arm/coast`  *(auth)*
+
+Enable or disable coast mode on one or more motors for manual manipulation.
+
+```json
+{ "motors": ["A","B"], "enable": true }
+```
+
+Omit `motors` to affect all. Set `"enable": false` to restore braking.
+
 ### `GET /v1/operations/{id}`  *(auth)*
 
 Poll an async operation.
@@ -314,6 +324,7 @@ Create buttons that call the service:
 * **Nudge** – POST `/v1/arm/move` body `{"mode":"relative","units":"rotations","joints":{"A":10},"speed":40}`
 * **Pick Left** – POST `/v1/arm/pickplace` body `{"location":"left","action":"pick","speed":50}`
 * **Stop** – POST `/v1/arm/stop` body `{"reason":"operator stop"}`
+* **Coast** – POST `/v1/arm/coast` body `{"enable":true}`
 
 Because headers are set in the Service Registry, you only supply **method/path/body** per action.
 
