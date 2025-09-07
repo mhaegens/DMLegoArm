@@ -62,6 +62,30 @@ class ArmController:
             "D": Motor("D"),  # rotation
         }
         self.current_abs: Dict[str, float] = {k: 0.0 for k in self.motors}
+        # Backlash compensation (degrees) for direction changes per motor.  The
+        # values persist in ``arm_calibration.json`` and may be overridden at
+        # startup via env vars ``ARM_BACKLASH_A``..``D``.  Useful when gears
+        # have slack and initial motion doesn't move the joint.
+        self._calib_path = os.path.join(os.path.dirname(__file__), "arm_calibration.json")
+        self.backlash: Dict[str, float] = {j: 0.0 for j in self.motors}
+        try:
+            with open(self._calib_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.backlash.update({j: float(data.get("backlash", {}).get(j, 0.0)) for j in self.motors})
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
+        for j in self.motors:
+            env = os.getenv(f"ARM_BACKLASH_{j}")
+            if env is not None:
+                try:
+                    self.backlash[j] = float(env)
+                except ValueError:
+                    pass
+        self.save_calibration()
+        # Track last movement direction per motor: -1, 0, 1
+        self._last_dir: Dict[str, int] = {j: 0 for j in self.motors}
         # Limit definitions for each joint.  When a joint has ``None`` limits it
         # can rotate freely without clamping.  Previously the controller always
         # enforced +/-180 or +/-360 degree limits which prevented rotations
@@ -124,6 +148,24 @@ class ArmController:
                             pass
         return {"motors": targets, "coast": enable}
 
+    def save_calibration(self) -> None:
+        try:
+            with open(self._calib_path, "w", encoding="utf-8") as f:
+                json.dump({"backlash": self.backlash}, f)
+        except Exception:
+            pass
+
+    def set_backlash(self, values: Dict[str, float]) -> dict:
+        with self.lock:
+            for j, v in values.items():
+                if j in self.motors:
+                    try:
+                        self.backlash[j] = float(v)
+                    except (TypeError, ValueError):
+                        continue
+            self.save_calibration()
+            return {"backlash": self.backlash.copy()}
+
     def move(self, mode: Literal["relative", "absolute"], joints: Dict[str, float], speed: int,
              timeout_s: Optional[float] = None, units: Literal["degrees", "rotations"] = "degrees"):
         start = time.time()
@@ -142,14 +184,20 @@ class ArmController:
                     raise InterruptedError("Movement interrupted")
                 if abs(delta) < 1e-6:
                     continue
+                dir_now = 1 if delta > 0 else -1
+                run_delta = delta
+                backlash = self.backlash.get(j, 0.0)
+                if backlash and self._last_dir[j] != 0 and dir_now != self._last_dir[j]:
+                    run_delta += backlash * dir_now
                 if units == "rotations":
-                    self.motors[j].run_for_rotations(delta / 360.0, speed=speed, blocking=True)
+                    self.motors[j].run_for_rotations(run_delta / 360.0, speed=speed, blocking=True)
                 else:
-                    self.motors[j].run_for_degrees(delta, speed=speed, blocking=True)
+                    self.motors[j].run_for_degrees(run_delta, speed=speed, blocking=True)
                 if self.stop_event.is_set():
                     self.stop_event.clear()
                     raise InterruptedError("Movement interrupted")
                 self.current_abs[j] += delta
+                self._last_dir[j] = dir_now
                 if timeout_s and time.time() - start > timeout_s:
                     raise TimeoutError("Movement timed out")
             self.stop_event.clear()
@@ -191,6 +239,7 @@ class ArmController:
             "abs_degrees": self.current_abs.copy(),
             "limits": self.limits.copy(),
             "motors": list(self.motors.keys()),
+            "backlash": self.backlash.copy(),
         }
 
 arm = ArmController()
@@ -341,11 +390,13 @@ class Handler(BaseHTTPRequestHandler):
                     "GET /v1/health",
                     "GET /v1/inventory",
                     "GET /v1/arm/state",
+                    "GET /v1/arm/backlash",
                     "POST /v1/arm/move",
                     "POST /v1/arm/pose",
                     "POST /v1/arm/stop",
                     "POST /v1/arm/coast",
                     "POST /v1/arm/pickplace",
+                    "POST /v1/arm/backlash",
                     "GET /v1/operations/{id}",
                 ] + process_eps,
                 "poses": ["home", "pick_left", "pick_right", "place_left", "place_right"],
@@ -357,6 +408,10 @@ class Handler(BaseHTTPRequestHandler):
             if (resp := auth_ok(self)):
                 return json_response(self, resp[0], resp[1])
             return json_response(self, {"ok": True, "data": arm.state()})
+        if path == "/v1/arm/backlash":
+            if (resp := auth_ok(self)):
+                return json_response(self, resp[0], resp[1])
+            return json_response(self, {"ok": True, "data": {"backlash": arm.backlash.copy()}})
         if path.startswith("/v1/operations/"):
             if (resp := auth_ok(self)):
                 return json_response(self, resp[0], resp[1])
@@ -409,7 +464,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
-        if path.startswith("/v1/processes/") or path in ("/v1/arm/move", "/v1/arm/pose", "/v1/arm/pickplace", "/v1/arm/stop", "/v1/arm/coast"):
+        if path.startswith("/v1/processes/") or path in ("/v1/arm/move", "/v1/arm/pose", "/v1/arm/pickplace", "/v1/arm/stop", "/v1/arm/coast", "/v1/arm/backlash"):
             if (resp := auth_ok(self)):
                 return json_response(self, resp[0], resp[1])
         if path == "/v1/arm/stop":
@@ -518,6 +573,17 @@ class Handler(BaseHTTPRequestHandler):
                     idem_store(self, resp)
                     return json_response(self, resp)
                 res = arm.pickplace(location, action, speed)
+                resp = {"ok": True, "data": res}
+                idem_store(self, resp)
+                return json_response(self, resp)
+
+            if path == "/v1/arm/backlash":
+                vals = body.get("backlash") if isinstance(body, dict) else None
+                if vals is None:
+                    vals = body
+                if not isinstance(vals, dict):
+                    return json_response(self, {"ok": False, "error": {"code": "BAD_BACKLASH", "message": "Provide backlash map"}}, 400)
+                res = arm.set_backlash(vals)
                 resp = {"ok": True, "data": res}
                 idem_store(self, resp)
                 return json_response(self, resp)
