@@ -84,7 +84,6 @@ class ArmController:
                 except ValueError:
                     pass
         self.save_calibration()
-
         # Track last movement direction per motor: -1, 0, 1
         self._last_dir: Dict[str, int] = {j: 0 for j in self.motors}
         # Limit definitions for each joint.  When a joint has ``None`` limits it
