@@ -64,16 +64,16 @@
               labelSpanS="12" labelSpanM="12" labelSpanL="12"
               columnsS="2" columnsM="3" columnsL="4">
 
-              <Label text="Motor A (deg)"/>
+              <Label text="Gripper (deg)"/>
               <Input id="degA" type="Number" value="0" width="100%"/>
 
-              <Label text="Motor B (deg)"/>
+              <Label text="Wrist (deg)"/>
               <Input id="degB" type="Number" value="0" width="100%"/>
 
-              <Label text="Motor C (deg)"/>
+              <Label text="Elbow (deg)"/>
               <Input id="degC" type="Number" value="0" width="100%"/>
 
-              <Label text="Motor D (deg)"/>
+              <Label text="Rotation (deg)"/>
               <Input id="degD" type="Number" value="0" width="100%"/>
 
               <Label text="Speed (deg/s)"/>
