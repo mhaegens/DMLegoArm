@@ -57,16 +57,25 @@ class ArmController:
             "D": Motor("D"),  # gripper
         }
         self.current_abs: Dict[str, float] = {k: 0.0 for k in self.motors}
-        self.limits = {
-            "A": (-360.0, 360.0),
-            "B": (-180.0, 180.0),
-            "C": (-180.0, 180.0),
-            "D": (-90.0, 90.0),
+        # Limit definitions for each joint.  When a joint has ``None`` limits it
+        # can rotate freely without clamping.  Previously the controller always
+        # enforced +/-180 or +/-360 degree limits which prevented rotations
+        # beyond those values.  Setting ``None`` for all joints effectively
+        # removes those limits and allows unrestricted movement while still
+        # keeping the ability to define limits in the future if desired.
+        self.limits: Dict[str, Optional[tuple[float, float]]] = {
+            "A": None,
+            "B": None,
+            "C": None,
+            "D": None,
         }
         self.lock = threading.Lock()
 
     def clamp(self, joint: str, value: float) -> float:
-        lo, hi = self.limits[joint]
+        limits = self.limits.get(joint)
+        if limits is None:
+            return value
+        lo, hi = limits
         return max(lo, min(hi, value))
 
     def stop_all(self):
