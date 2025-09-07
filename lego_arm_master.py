@@ -62,6 +62,14 @@ class ArmController:
             "D": Motor("D"),  # rotation
         }
         self.current_abs: Dict[str, float] = {k: 0.0 for k in self.motors}
+        # Backlash compensation (degrees) for direction changes per motor.  Set
+        # via env vars ``ARM_BACKLASH_A``..``D``.  Useful when gears have slack
+        # and initial motion doesn't move the joint.
+        self.backlash: Dict[str, float] = {
+            j: float(os.getenv(f"ARM_BACKLASH_{j}", "0")) for j in self.motors
+        }
+        # Track last movement direction per motor: -1, 0, 1
+        self._last_dir: Dict[str, int] = {j: 0 for j in self.motors}
         # Limit definitions for each joint.  When a joint has ``None`` limits it
         # can rotate freely without clamping.  Previously the controller always
         # enforced +/-180 or +/-360 degree limits which prevented rotations
@@ -142,14 +150,20 @@ class ArmController:
                     raise InterruptedError("Movement interrupted")
                 if abs(delta) < 1e-6:
                     continue
+                dir_now = 1 if delta > 0 else -1
+                run_delta = delta
+                backlash = self.backlash.get(j, 0.0)
+                if backlash and self._last_dir[j] != 0 and dir_now != self._last_dir[j]:
+                    run_delta += backlash * dir_now
                 if units == "rotations":
-                    self.motors[j].run_for_rotations(delta / 360.0, speed=speed, blocking=True)
+                    self.motors[j].run_for_rotations(run_delta / 360.0, speed=speed, blocking=True)
                 else:
-                    self.motors[j].run_for_degrees(delta, speed=speed, blocking=True)
+                    self.motors[j].run_for_degrees(run_delta, speed=speed, blocking=True)
                 if self.stop_event.is_set():
                     self.stop_event.clear()
                     raise InterruptedError("Movement interrupted")
                 self.current_abs[j] += delta
+                self._last_dir[j] = dir_now
                 if timeout_s and time.time() - start > timeout_s:
                     raise TimeoutError("Movement timed out")
             self.stop_event.clear()
