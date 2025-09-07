@@ -274,6 +274,7 @@
               .sort((a,b)=>MOTOR_ORDER.indexOf(a.name)-MOTOR_ORDER.indexOf(b.name))
               .map((m,i)=>({id:i+1,...m}));
             setMotors(ordered);
+            console.log("Current positions:", ordered.map(m=>({name:m.name,pos:m.pos})));
             const sample = { t: now(), angles: Object.fromEntries(ordered.map(m=>[m.name, m.pos])) };
             setRing(prev => {
               const arr = [...prev, sample];
