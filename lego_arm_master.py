@@ -178,6 +178,7 @@ class ArmController:
                 plan = {j: self.clamp(j, self.current_abs[j] + deg) - self.current_abs[j] for j, deg in joints_deg.items()}
             else:
                 plan = {j: self.clamp(j, deg) - self.current_abs[j] for j, deg in joints_deg.items()}
+            threads: list[tuple[threading.Thread, str, float, int]] = []
             for j, delta in plan.items():
                 if self.stop_event.is_set():
                     self.stop_event.clear()
@@ -189,10 +190,16 @@ class ArmController:
                 backlash = self.backlash.get(j, 0.0)
                 if backlash and self._last_dir[j] != 0 and dir_now != self._last_dir[j]:
                     run_delta += backlash * dir_now
+                m = self.motors[j]
                 if units == "rotations":
-                    self.motors[j].run_for_rotations(run_delta / 360.0, speed=speed, blocking=True)
+                    target = run_delta / 360.0
+                    t = threading.Thread(target=m.run_for_rotations, args=(target,), kwargs={"speed": speed, "blocking": True})
                 else:
-                    self.motors[j].run_for_degrees(run_delta, speed=speed, blocking=True)
+                    t = threading.Thread(target=m.run_for_degrees, args=(run_delta,), kwargs={"speed": speed, "blocking": True})
+                t.start()
+                threads.append((t, j, delta, dir_now))
+            for t, j, delta, dir_now in threads:
+                t.join()
                 if self.stop_event.is_set():
                     self.stop_event.clear()
                     raise InterruptedError("Movement interrupted")

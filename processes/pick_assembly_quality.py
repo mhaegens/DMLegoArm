@@ -1,20 +1,37 @@
-"""Pick from assembly side and place on quality side."""
+"""Pick from assembly side and place on quality side using absolute poses."""
 
 from typing import Any
 
 
 def run(arm) -> Any:
     """Execute the pick-assembly-quality workflow."""
-    arm.goto_pose("home", speed=60)
-    arm.move("relative", {"A": -90}, speed=50)
-    arm.move("relative", {"D": 30}, speed=30)  # open claw
-    arm.move("relative", {"B": -20}, speed=40)  # move down
-    arm.move("relative", {"D": -30}, speed=30)  # close claw
-    arm.move("relative", {"B": 20}, speed=40)  # move up
-    arm.move("relative", {"A": 180}, speed=50)  # rotate to quality side
-    arm.move("relative", {"B": -20}, speed=40)  # move down
-    arm.move("relative", {"D": 30}, speed=30)  # open claw
-    arm.move("relative", {"B": 20}, speed=40)  # move up
-    arm.move("relative", {"D": -30}, speed=30)  # close claw
-    return arm.goto_pose("home", speed=60)
+    speed = 100  # top speed
+    arm.set_backlash({"D": 5 * 360})  # 5 rotations backlash on motor D
+    arm.move("absolute", {"A": 0, "B": 0, "C": 0, "D": 0}, speed=speed)
+    arm.move(
+        "absolute",
+        {"A": -20160, "B": 0, "C": -37800, "D": 43920},
+        speed=speed,
+    )
+    arm.move(
+        "absolute",
+        {"A": -21600, "B": 0, "C": -34920, "D": 43920},
+        speed=speed,
+    )
+    arm.move(
+        "absolute",
+        {"A": -21600, "B": 14400, "C": -9720, "D": 3600},
+        speed=speed,
+    )
+    arm.move(
+        "absolute",
+        {"A": -21600, "B": 3240, "C": -29880, "D": -39600},
+        speed=speed,
+    )
+    arm.move(
+        "absolute",
+        {"A": -20880, "B": 3240, "C": 2520, "D": -39600},
+        speed=speed,
+    )
+    return arm.move("absolute", {"A": 0, "B": 0, "C": 0, "D": 0}, speed=speed)
 
