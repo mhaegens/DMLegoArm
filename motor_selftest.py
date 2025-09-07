@@ -32,6 +32,7 @@ except Exception:
             return self._pos
 
 PORTS = ["A", "B", "C", "D"]
+NAMES = {"A": "Gripper", "B": "Wrist", "C": "Elbow", "D": "Rotation"}
 
 
 def test_motor(port: str) -> Dict[str, float]:
@@ -49,14 +50,16 @@ def main():
     print("Running quick motor self-test")
     all_ok = True
     for p in PORTS:
+        name = NAMES.get(p)
+        label = f"{p} ({name})" if name else p
         try:
             res = test_motor(p)
             status = "OK" if res["ok"] else "OFFSET"
-            print(f"Port {p}: {status} start={res['start']:.1f} mid={res['mid']:.1f} end={res['end']:.1f}")
+            print(f"Port {label}: {status} start={res['start']:.1f} mid={res['mid']:.1f} end={res['end']:.1f}")
             all_ok &= res["ok"]
         except Exception as e:
             all_ok = False
-            print(f"Port {p}: ERROR {e}")
+            print(f"Port {label}: ERROR {e}")
     if all_ok:
         print("All motors responded as expected")
     else:

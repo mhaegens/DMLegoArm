@@ -37,7 +37,7 @@ If you need stronger guarantees (audit log, parallel motion, OpenAPI/Swagger, au
 ## Hardware
 
 * Raspberry Pi with **Build HAT** connected and powered
-* LEGO motors connected to ports **A/B/C/D** (you can remap in code)
+* LEGO motors connected to ports **A/B/C/D** (A = gripper, B = wrist, C = elbow, D = rotation)
 * Optional: run **without** hardware via `USE_FAKE_MOTORS=1`
 
 > Build HAT tip: on Raspberry Pi OS (Bookworm/bullseye), enable UART so `/dev/serial0` exists and allow your user access:

@@ -56,10 +56,10 @@ except Exception:
 class ArmController:
     def __init__(self):
         self.motors: Dict[str, Motor] = {
-            "A": Motor("A"),  # base
-            "B": Motor("B"),  # shoulder
+            "A": Motor("A"),  # gripper
+            "B": Motor("B"),  # wrist
             "C": Motor("C"),  # elbow
-            "D": Motor("D"),  # gripper
+            "D": Motor("D"),  # rotation
         }
         self.current_abs: Dict[str, float] = {k: 0.0 for k in self.motors}
         # Limit definitions for each joint.  When a joint has ``None`` limits it
@@ -158,10 +158,10 @@ class ArmController:
     def goto_pose(self, name: str, speed: int):
         poses = {
             "home": {"A": 0, "B": 0, "C": 0, "D": 0},
-            "pick_left": {"A": -60, "B": -20, "C": 30, "D": 20},
-            "pick_right": {"A": 60, "B": -20, "C": 30, "D": 20},
-            "place_left": {"A": -60, "B": 10, "C": -10, "D": -5},
-            "place_right": {"A": 60, "B": 10, "C": -10, "D": -5},
+            "pick_left": {"D": -60, "B": -20, "C": 30, "A": 20},
+            "pick_right": {"D": 60, "B": -20, "C": 30, "A": 20},
+            "place_left": {"D": -60, "B": 10, "C": -10, "A": -5},
+            "place_right": {"D": 60, "B": 10, "C": -10, "A": -5},
         }
         if name not in poses:
             raise ValueError(f"Unknown pose '{name}'")
@@ -183,7 +183,7 @@ class ArmController:
         for p in steps:
             result = self.goto_pose(p, speed)
         grip = {"pick": -30, "place": 30}[action]
-        result = self.move("relative", {"D": grip}, speed)
+        result = self.move("relative", {"A": grip}, speed)
         return result
 
     def state(self) -> dict:
