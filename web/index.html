@@ -653,11 +653,11 @@
                     </select>
                   ) : (
                     <select className="px-3 py-2 rounded-xl bg-white border border-slate-200" value={stepRot}
-                            onChange={e=>setStepRot(parseFloat(e.target.value)||0.25)}>
-                      <option value="0.25">0.25r</option>
-                      <option value="0.5">0.5r</option>
+                            onChange={e=>setStepRot(parseFloat(e.target.value)||1)}>
                       <option value="1">1r</option>
-                      <option value="2">2r</option>
+                      <option value="10">10r</option>
+                      <option value="50">50r</option>
+                      <option value="100">100r</option>
                     </select>
                   )}
                 </div>
