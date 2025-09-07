@@ -126,6 +126,8 @@
       const [adminOpen,setAdminOpen]=useState(false);
       const [qrOpen,setQrOpen]=useState(false);
       const [consoleOpen,setConsoleOpen]=useState(false);
+      const [backlashOpen,setBacklashOpen]=useState(false);
+      const [backlash,setBacklash]=useState({A:0,B:0,C:0,D:0});
 
       // Pill action menu (J/C/B) state
       const [pillMenu,setPillMenu]=useState({open:false, motor:null, x:0, y:0});
@@ -237,6 +239,23 @@
         for(const item of offlineQueue){ await api(item.method, item.path, item.body).catch(()=>{}); }
         setOfflineQueue([]);
       }
+
+      async function saveBacklash(){
+        try{
+          await api("POST","/v1/arm/backlash",backlash);
+          addLog({level:"ok", text:"Saved backlash"});
+        }catch{
+          addLog({level:"err", text:"Failed to save backlash"});
+        }
+      }
+
+      useEffect(()=>{
+        if(adminOpen && backlashOpen){
+          api("GET","/v1/arm/backlash", undefined, {log:false})
+            .then(d=>setBacklash({A:0,B:0,C:0,D:0, ...(d||{})}))
+            .catch(()=>{});
+        }
+      }, [adminOpen, backlashOpen]);
 
       // Health & state polling
       async function checkHealth(){
@@ -968,6 +987,23 @@
                     <label>Gain <input type="number" className="border rounded px-2 py-1 w-24" value={tiltGain} step="0.05" min="0.05" max="1.5" onChange={e=>setTiltGain(parseFloat(e.target.value)||0.05)}/></label>
                   </div>
                 </div>
+                <div className="mt-4 text-center text-[10px] text-slate-300 select-none cursor-pointer" onDoubleClick={()=>setBacklashOpen(!backlashOpen)}>fw</div>
+                {backlashOpen && (
+                  <div className="mt-4">
+                    <div className="text-sm font-semibold mb-1">Backlash calibration</div>
+                    <div className="text-xs text-slate-600 mb-2">Extra degrees added on direction change.</div>
+                    {['A','B','C','D'].map(m=>(
+                      <label key={m} className="flex items-center gap-2 mb-2">
+                        <span className="w-4">{m}</span>
+                        <input type="number" step="0.1" className="border rounded px-2 py-1 w-24" value={backlash[m] ?? 0} onChange={e=>setBacklash({...backlash,[m]:parseFloat(e.target.value)||0})} />
+                      </label>
+                    ))}
+                    <div className="mt-2 flex gap-2">
+                      <button className="px-3 py-2 rounded-xl bg-brand-600 text-white" onClick={saveBacklash}>Save</button>
+                      <button className="px-3 py-2 rounded-xl bg-white border" onClick={()=>setBacklashOpen(false)}>Close</button>
+                    </div>
+                  </div>
+                )}
               </aside>
             </div>
           )}
