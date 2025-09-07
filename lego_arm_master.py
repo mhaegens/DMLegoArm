@@ -33,6 +33,7 @@ except Exception:
         def __init__(self, port: str):
             self.port = port
             self._pos = 0.0  # pseudo degrees
+            self.stop_action = "brake"
         def run_for_degrees(self, degrees: float, speed: int = 50, blocking: bool = True):
             self._pos += degrees
             if blocking:
@@ -41,6 +42,10 @@ except Exception:
             self.run_for_degrees(rotations * 360.0, speed, blocking)
         def stop(self):
             pass
+        def float(self):
+            pass
+        def set_default_stop_action(self, action: str):
+            self.stop_action = action
         def get_degrees(self):
             return self._pos
 
@@ -81,6 +86,38 @@ class ArmController:
     def stop_all(self):
         for m in self.motors.values():
             m.stop()
+
+    def coast(self, motors: Optional[list[str]] = None, enable: bool = True):
+        targets = motors or list(self.motors.keys())
+        with self.lock:
+            for j in targets:
+                m = self.motors.get(j)
+                if not m:
+                    continue
+                action = "coast" if enable else "brake"
+                if hasattr(m, "set_default_stop_action"):
+                    try:
+                        m.set_default_stop_action(action)
+                    except Exception:
+                        pass
+                if enable and hasattr(m, "float"):
+                    try:
+                        m.float()
+                        continue
+                    except Exception:
+                        pass
+                try:
+                    m.stop()
+                except Exception:
+                    pass
+                if not enable:
+                    getter = getattr(m, "get_degrees", None) or getattr(m, "get_position", None)
+                    if getter:
+                        try:
+                            self.current_abs[j] = float(getter())
+                        except Exception:
+                            pass
+        return {"motors": targets, "coast": enable}
 
     def move(self, mode: Literal["relative", "absolute"], joints: Dict[str, float], speed: int,
              timeout_s: Optional[float] = None, units: Literal["degrees", "rotations"] = "degrees"):
@@ -292,6 +329,7 @@ class Handler(BaseHTTPRequestHandler):
                     "POST /v1/arm/move",
                     "POST /v1/arm/pose",
                     "POST /v1/arm/stop",
+                    "POST /v1/arm/coast",
                     "POST /v1/arm/pickplace",
                     "GET /v1/operations/{id}",
                 ] + process_eps,
@@ -356,7 +394,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
-        if path.startswith("/v1/processes/") or path in ("/v1/arm/move", "/v1/arm/pose", "/v1/arm/pickplace", "/v1/arm/stop"):
+        if path.startswith("/v1/processes/") or path in ("/v1/arm/move", "/v1/arm/pose", "/v1/arm/pickplace", "/v1/arm/stop", "/v1/arm/coast"):
             if (resp := auth_ok(self)):
                 return json_response(self, resp[0], resp[1])
         if path == "/v1/arm/stop":
@@ -429,6 +467,16 @@ class Handler(BaseHTTPRequestHandler):
                     idem_store(self, resp)
                     return json_response(self, resp)
                 res = arm.goto_pose(name, speed)
+                resp = {"ok": True, "data": res}
+                idem_store(self, resp)
+                return json_response(self, resp)
+
+            if path == "/v1/arm/coast":
+                motors = body.get("motors")
+                if motors is not None and not isinstance(motors, list):
+                    return json_response(self, {"ok": False, "error": {"code": "BAD_COAST", "message": "motors must be list"}}, 400)
+                enable = bool(body.get("enable", True))
+                res = arm.coast(motors, enable)
                 resp = {"ok": True, "data": res}
                 idem_store(self, resp)
                 return json_response(self, resp)

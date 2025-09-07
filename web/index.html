@@ -248,6 +248,12 @@
         await api("POST","/v1/arm/pose", {name, speed}, {queueIfOffline:true});
       }
 
+      async function sendCoast(motorNames, enable=true){
+        const body = {enable};
+        if(motorNames){ body.motors = Array.isArray(motorNames) ? motorNames : [motorNames]; }
+        await api("POST","/v1/arm/coast", body, {queueIfOffline:true}).catch(()=>{});
+      }
+
       async function stop(){ await api("POST","/v1/arm/stop",{reason:"ui stop"},{queueIfOffline:true}).catch(()=>{}); }
 
       // Unified STOP handler (also cancels any ongoing jog repeat)
@@ -526,6 +532,8 @@
                     <span className="font-semibold">{m.name}</span>
                     <span className="opacity-90 ml-0.5">{Math.round(m.pos)}°</span>
                     <button className="ml-1 px-1 py-0.5 rounded bg-white/20 hover:bg-white/30" title="Jog" onClick={()=>setJogMotor(m)}>J</button>
+                    <button className="ml-1 px-1 py-0.5 rounded bg-white/20 hover:bg-white/30" title="Coast" onClick={()=>sendCoast(m.name,true)}>C</button>
+                    <button className="ml-1 px-1 py-0.5 rounded bg-white/20 hover:bg-white/30" title="Brake" onClick={()=>sendCoast(m.name,false)}>B</button>
                   </MotorPill>
                 ))}
               </div>
@@ -550,9 +558,11 @@
                 <h2 className="text-slate-800 font-semibold">General</h2>
                 <div className="text-xs text-slate-500">Quick actions</div>
               </div>
-              <div className="mt-4 grid sm:grid-cols-5 gap-3">
+              <div className="mt-4 grid sm:grid-cols-7 gap-3">
                 <button className="px-3 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white" onClick={()=>sendPose("home")}>Home</button>
                 <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={handleStop}>Stop</button>
+                <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={()=>sendCoast(null,true)}>Coast all</button>
+                <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={()=>sendCoast(null,false)}>Brake all</button>
                 <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={()=>checkHealth()}>Health</button>
                 <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={()=>loadInventory(true)}>Inventory</button>
                 <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={()=>refresh()}>Refresh positions</button>
