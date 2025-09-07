@@ -129,7 +129,12 @@
       const [ring,setRing]=useLocalStorage("ra.ring", []);
 
       // Soft limits
-      const [limits,setLimits]=useLocalStorage("ra.limits", {A:{min:-180,max:180},B:{min:-180,max:180},C:{min:-180,max:180},D:{min:-180,max:180}});
+      const [limits,setLimits]=useLocalStorage("ra.limits", {
+        A:{min:-9999,max:9999},
+        B:{min:-9999,max:9999},
+        C:{min:-9999,max:9999},
+        D:{min:-9999,max:9999}
+      });
 
       // Teach poses
       const [taught,setTaught]=useLocalStorage("ra.taught", {});
@@ -159,7 +164,10 @@
       const [customPath,setCustomPath]=useState("/v1/arm/move");
       const [customMethod,setCustomMethod]=useState("POST");
       const [customBody,setCustomBody]=useState('{"mode":"relative","joints":{"A":10},"speed":40}');
-      const [step,setStep]=useLocalStorage("ra.step",5);
+      const [nudgeUnit,setNudgeUnit]=useLocalStorage("ra.nudgeUnit","deg");
+      const [stepDeg,setStepDeg]=useLocalStorage("ra.stepDeg",5);
+      const [stepRot,setStepRot]=useLocalStorage("ra.stepRot",1);
+      const step = nudgeUnit==='deg' ? stepDeg : stepRot;
 
       const polling = useRef(false);
       const alive = useRef(true);
@@ -629,10 +637,29 @@
               <div className="flex items-center justify-between">
                 <h2 className="text-slate-800 font-semibold">Nudge controls</h2>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-600">Step</span>
-                  <select className="px-3 py-2 rounded-xl bg-white border border-slate-200" value={step} onChange={e=>window.localStorage.setItem('ra.step', JSON.stringify(parseInt(e.target.value)||5)) || location.reload()}>
-                    <option value="1">1°</option><option value="2">2°</option><option value="5">5°</option><option value="10">10°</option>
+                  <span className="text-xs text-slate-600">Units</span>
+                  <select className="px-3 py-2 rounded-xl bg-white border border-slate-200" value={nudgeUnit} onChange={e=>setNudgeUnit(e.target.value)}>
+                    <option value="deg">Degrees</option>
+                    <option value="rot">Rotations</option>
                   </select>
+                  <span className="text-xs text-slate-600">Step</span>
+                  {nudgeUnit==='deg' ? (
+                    <select className="px-3 py-2 rounded-xl bg-white border border-slate-200" value={stepDeg}
+                            onChange={e=>setStepDeg(parseFloat(e.target.value)||1)}>
+                      <option value="1">1°</option>
+                      <option value="2">2°</option>
+                      <option value="5">5°</option>
+                      <option value="10">10°</option>
+                    </select>
+                  ) : (
+                    <select className="px-3 py-2 rounded-xl bg-white border border-slate-200" value={stepRot}
+                            onChange={e=>setStepRot(parseFloat(e.target.value)||0.25)}>
+                      <option value="0.25">0.25r</option>
+                      <option value="0.5">0.5r</option>
+                      <option value="1">1r</option>
+                      <option value="2">2r</option>
+                    </select>
+                  )}
                 </div>
               </div>
               <div className="mt-4 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -640,11 +667,13 @@
                   <div key={m.id} className="border rounded-2xl p-4">
                     <div className="flex items-center justify-between">
                       <div className="font-semibold">{m.name}</div>
-                      <div className="text-sm text-slate-500">{Math.round(m.pos)}°</div>
+                      <div className="text-sm text-slate-500">{nudgeUnit==='deg' ? Math.round(m.pos)+'°' : (m.pos/360).toFixed(2)+'r'}</div>
                     </div>
                     <div className="mt-3 flex gap-2">
-                      <button className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 w-full" onClick={()=>nudge(m.name,-(step||5))}>-{step||5}°</button>
-                      <button className="px-3 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white w-full" onClick={()=>nudge(m.name,(step||5))}>+{step||5}°</button>
+                      <button className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 w-full"
+                              onClick={()=>nudge(m.name,-step*(nudgeUnit==='deg'?1:360))}>-{step}{nudgeUnit==='deg'?'°':'r'}</button>
+                      <button className="px-3 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white w-full"
+                              onClick={()=>nudge(m.name,step*(nudgeUnit==='deg'?1:360))}>+{step}{nudgeUnit==='deg'?'°':'r'}</button>
                       <button className="px-3 py-2 rounded-xl bg-slate-800 text-white w-14 pressable" title="Jog with tilt" onClick={()=>setJogMotor(m)}>J</button>
                     </div>
                   </div>
@@ -959,7 +988,7 @@
                   >+1°</button>
                 </div>
 
-                <div className="mt-3 text-sm text-slate-700">Soft limits: [{(limits[jogMotor.name]?.min ?? -180)}°, {(limits[jogMotor.name]?.max ?? 180)}°]</div>
+                <div className="mt-3 text-sm text-slate-700">Soft limits: [{(limits[jogMotor.name]?.min ?? -9999)}°, {(limits[jogMotor.name]?.max ?? 9999)}°]</div>
                 <div className="mt-3 flex gap-2">
                   <input
                     type="number"
