@@ -208,11 +208,7 @@
       };
 
       async function api(method, path, body, {timeoutMs=8000, queueIfOffline=false, log=true}={}){
-        if(!baseUrl){
-          if(log) addLog({level:"err",text:"Base URL not set"});
-          throw new Error("Base URL not set");
-        }
-        const url = join(baseUrl, path);
+        const url = join(baseUrl || "", path);
         if(queueIfOffline && !connected){
           const item={method,path,body,ts:now()}; setOfflineQueue(q=>[...q,item]);
           if(log) addLog({level:"ok",text:"Queued (offline): "+method+" "+url, body});
@@ -365,7 +361,6 @@
       // Polling intervals & tab visibility
       useEffect(()=>{ checkHealth(); const id=setInterval(checkHealth,15000); return ()=>clearInterval(id); }, [baseUrl, apiKey]);
       useEffect(()=>{
-        if(!baseUrl) return;
         updatePositions();
         const id=setInterval(()=>{ if(!document.hidden) updatePositions(); }, 5000);
         const onVis = () => { if(!document.hidden) updatePositions(); };
