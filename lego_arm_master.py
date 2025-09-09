@@ -167,6 +167,9 @@ class ArmController:
             self.save_calibration()
             return {"backlash": self.backlash.copy()}
 
+    def last_direction(self) -> dict:
+        return self._last_dir.copy()
+
     def move(self, mode: Literal["relative", "absolute"], joints: Dict[str, float], speed: int,
              timeout_s: Optional[float] = None, units: Literal["degrees", "rotations"] = "degrees"):
         start = time.time()
@@ -420,7 +423,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/v1/arm/backlash":
             if (resp := auth_ok(self)):
                 return json_response(self, resp[0], resp[1])
-            return json_response(self, {"ok": True, "data": {"backlash": arm.backlash.copy()}})
+            return json_response(self, {"ok": True, "data": {"backlash": arm.backlash.copy(), "last_dir": arm.last_direction()}})
         if path.startswith("/v1/operations/"):
             if (resp := auth_ok(self)):
                 return json_response(self, resp[0], resp[1])
@@ -593,6 +596,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(vals, dict):
                     return json_response(self, {"ok": False, "error": {"code": "BAD_BACKLASH", "message": "Provide backlash map"}}, 400)
                 res = arm.set_backlash(vals)
+                res["last_dir"] = arm.last_direction()
                 resp = {"ok": True, "data": res}
                 idem_store(self, resp)
                 return json_response(self, resp)
