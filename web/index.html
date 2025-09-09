@@ -128,6 +128,7 @@
       const [consoleOpen,setConsoleOpen]=useState(false);
       const [backlashOpen,setBacklashOpen]=useState(false);
       const [backlash,setBacklash]=useState({A:0,B:0,C:0,D:0});
+      const [lastDir,setLastDir]=useState({A:0,B:0,C:0,D:0});
 
       // Pill action menu (J/C/B) state
       const [pillMenu,setPillMenu]=useState({open:false, motor:null, x:0, y:0});
@@ -248,7 +249,10 @@
       useEffect(()=>{
         if(adminOpen && backlashOpen){
           api("GET","/v1/arm/backlash", undefined, {log:false})
-            .then(d=>setBacklash({A:0,B:0,C:0,D:0, ...(d||{})}))
+            .then(d=>{
+              setBacklash({A:0,B:0,C:0,D:0, ...(d?.backlash||{})});
+              setLastDir({A:0,B:0,C:0,D:0, ...(d?.last_dir||{})});
+            })
             .catch(()=>{});
         }
       }, [adminOpen, backlashOpen]);
@@ -1007,6 +1011,7 @@
                       <label key={m} className="flex items-center gap-2 mb-2">
                         <span className="w-4">{m}</span>
                         <input type="number" step="0.1" className="border rounded px-2 py-1 w-24" value={backlash[m] ?? 0} onChange={e=>setBacklash({...backlash,[m]:parseFloat(e.target.value)||0})} />
+                        <span className="text-xs text-slate-500">last: {lastDir[m] ?? 0}</span>
                       </label>
                     ))}
                     <div className="mt-2 flex gap-2">
