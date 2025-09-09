@@ -68,10 +68,13 @@ class ArmController:
         # have slack and initial motion doesn't move the joint.
         self._calib_path = os.path.join(os.path.dirname(__file__), "arm_calibration.json")
         self.backlash: Dict[str, float] = {j: 0.0 for j in self.motors}
+        # Track last movement direction per motor: -1, 0, 1
+        self._last_dir: Dict[str, int] = {j: 0 for j in self.motors}
         try:
             with open(self._calib_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self.backlash.update({j: float(data.get("backlash", {}).get(j, 0.0)) for j in self.motors})
+            self._last_dir.update({j: int(data.get("last_dir", {}).get(j, 0)) for j in self.motors})
         except FileNotFoundError:
             pass
         except Exception:
@@ -84,8 +87,6 @@ class ArmController:
                 except ValueError:
                     pass
         self.save_calibration()
-        # Track last movement direction per motor: -1, 0, 1
-        self._last_dir: Dict[str, int] = {j: 0 for j in self.motors}
         # Limit definitions for each joint.  When a joint has ``None`` limits it
         # can rotate freely without clamping.  Previously the controller always
         # enforced +/-180 or +/-360 degree limits which prevented rotations
@@ -151,7 +152,7 @@ class ArmController:
     def save_calibration(self) -> None:
         try:
             with open(self._calib_path, "w", encoding="utf-8") as f:
-                json.dump({"backlash": self.backlash}, f)
+                json.dump({"backlash": self.backlash, "last_dir": self._last_dir}, f)
         except Exception:
             pass
 
@@ -208,6 +209,7 @@ class ArmController:
                 if timeout_s and time.time() - start > timeout_s:
                     raise TimeoutError("Movement timed out")
             self.stop_event.clear()
+            self.save_calibration()
         return {"new_abs": self.current_abs.copy()}
 
     def goto_pose(self, name: str, speed: int):
