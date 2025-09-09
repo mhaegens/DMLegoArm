@@ -259,29 +259,43 @@
 
       // Health & state polling
       async function checkHealth(){
-        try{ await api("GET","/v1/health", undefined, {log:false}); setConnected(true); }
-        catch{ setConnected(false); }
+        console.log("Checking health...");
+        try{
+          await api("GET","/v1/health", undefined, {log:false});
+          setConnected(true);
+          console.log("Health check: OK");
+        } catch {
+          setConnected(false);
+          console.warn("Health check: FAILED");
+        }
       }
 
       async function updatePositions(){
         if(polling.current) return;
         polling.current = true;
         try{
-          const s = await api("GET","/v1/arm/state", undefined, {log:false}).catch(()=>null);
+          const s = await api("GET","/v1/arm/state", undefined, {log:false});
           if(s?.abs_degrees){
             const ordered = Object.entries(s.abs_degrees)
               .map(([k,v])=>({name:k,pos:normalizeDeg(+v)}))
               .sort((a,b)=>MOTOR_ORDER.indexOf(a.name)-MOTOR_ORDER.indexOf(b.name))
               .map((m,i)=>({id:i+1,...m}));
             setMotors(ordered);
+            console.log("Current positions:", ordered.map(m=>({name:m.name,pos:m.pos})));
             const sample = { t: now(), angles: Object.fromEntries(ordered.map(m=>[m.name, m.pos])) };
             setRing(prev => {
               const arr = [...prev, sample];
               const cutoff = now() - RING_MS;
               return arr.filter(s => s.t >= cutoff);
             });
+          } else {
+            console.warn("State response missing current positions");
           }
-        } finally { polling.current=false; }
+        } catch {
+          console.warn("Failed to fetch current positions");
+        } finally {
+          polling.current=false;
+        }
       }
 
       async function loadInventory(show=false){
@@ -324,7 +338,10 @@
         setMotors(p=>p.map(x=>x.name===name?{...x,pos:normalizeDeg(x.pos+deltaDeg)}:x));
       }
 
-      async function refresh(){ await updatePositions(); }
+      async function refresh(){
+        console.log("Refreshing positions...");
+        await updatePositions();
+      }
 
       async function runTuner({joint="A", amplitude=5, speeds=[20,40,60,80], settleMs=350}){
         const results=[];
