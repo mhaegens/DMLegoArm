@@ -274,7 +274,7 @@
         if(polling.current) return;
         polling.current = true;
         try{
-          const s = await api("GET","/v1/arm/state", undefined, {log:false}).catch(()=>null);
+          const s = await api("GET","/v1/arm/state", undefined, {log:false});
           if(s?.abs_degrees){
             const ordered = Object.entries(s.abs_degrees)
               .map(([k,v])=>({name:k,pos:normalizeDeg(+v)}))
@@ -288,8 +288,14 @@
               const cutoff = now() - RING_MS;
               return arr.filter(s => s.t >= cutoff);
             });
+          } else {
+            console.warn("State response missing current positions");
           }
-        } finally { polling.current=false; }
+        } catch {
+          console.warn("Failed to fetch current positions");
+        } finally {
+          polling.current=false;
+        }
       }
 
       async function loadInventory(show=false){
