@@ -182,7 +182,6 @@ class ArmController:
                 plan = {j: self.clamp(j, self.current_abs[j] + deg) - self.current_abs[j] for j, deg in joints_deg.items()}
             else:
                 plan = {j: self.clamp(j, deg) - self.current_abs[j] for j, deg in joints_deg.items()}
-            threads: list[tuple[threading.Thread, str, float, int]] = []
             for j, delta in plan.items():
                 if self.stop_event.is_set():
                     self.stop_event.clear()
@@ -197,13 +196,9 @@ class ArmController:
                 m = self.motors[j]
                 if units == "rotations":
                     target = run_delta / 360.0
-                    t = threading.Thread(target=m.run_for_rotations, args=(target,), kwargs={"speed": speed, "blocking": True})
+                    m.run_for_rotations(target, speed=speed, blocking=True)
                 else:
-                    t = threading.Thread(target=m.run_for_degrees, args=(run_delta,), kwargs={"speed": speed, "blocking": True})
-                t.start()
-                threads.append((t, j, delta, dir_now))
-            for t, j, delta, dir_now in threads:
-                t.join()
+                    m.run_for_degrees(run_delta, speed=speed, blocking=True)
                 if self.stop_event.is_set():
                     self.stop_event.clear()
                     raise InterruptedError("Movement interrupted")
