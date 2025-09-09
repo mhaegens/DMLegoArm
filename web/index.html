@@ -126,9 +126,13 @@
       const [adminOpen,setAdminOpen]=useState(false);
       const [qrOpen,setQrOpen]=useState(false);
       const [consoleOpen,setConsoleOpen]=useState(false);
-      const [backlashOpen,setBacklashOpen]=useState(false);
+      const [positionsOpen,setPositionsOpen]=useState(false);
       const [backlash,setBacklash]=useState({A:0,B:0,C:0,D:0});
       const [lastDir,setLastDir]=useState({A:0,B:0,C:0,D:0});
+      const formattedPositions = useMemo(
+        () => motors.map(m => `${m.name}: ${(m.pos/360).toFixed(2).replace('.', ',')} rot`).join('\n'),
+        [motors]
+      );
 
       // Pill action menu (J/C/B) state
       const [pillMenu,setPillMenu]=useState({open:false, motor:null, x:0, y:0});
@@ -247,7 +251,7 @@
       }
 
       useEffect(()=>{
-        if(adminOpen && backlashOpen){
+        if(adminOpen){
           api("GET","/v1/arm/backlash", undefined, {log:false})
             .then(d=>{
               setBacklash({A:0,B:0,C:0,D:0, ...(d?.backlash||{})});
@@ -255,7 +259,7 @@
             })
             .catch(()=>{});
         }
-      }, [adminOpen, backlashOpen]);
+      }, [adminOpen]);
 
       // Health & state polling
       async function checkHealth(verbose=false){
@@ -341,6 +345,11 @@
       async function refresh(verbose=false){
         if(verbose) console.log("Refreshing positions...");
         await updatePositions(verbose);
+      }
+
+      async function handleRefreshPositions(){
+        await refresh(true);
+        setPositionsOpen(true);
       }
 
       async function runTuner({joint="A", amplitude=5, speeds=[20,40,60,80], settleMs=350}){
@@ -656,7 +665,7 @@
                 <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={()=>sendCoast(null,true)}>Coast all</button>
                 <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={()=>checkHealth(true)}>Health</button>
                 <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={()=>loadInventory(true)}>Inventory</button>
-                <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={()=>refresh(true)}>Refresh positions</button>
+                <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={handleRefreshPositions}>Refresh positions</button>
               </div>
             </section>
 
@@ -915,6 +924,21 @@
             </div>
           )}
 
+          {/* Positions modal */}
+          {positionsOpen && (
+            <div className="fixed inset-0 z-40 flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="pos-title">
+              <div className="absolute inset-0 bg-black/40" onClick={()=>setPositionsOpen(false)}></div>
+              <div className="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 id="pos-title" className="text-lg font-semibold text-slate-800">Positions</h3>
+                  <button className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200" onClick={()=>setPositionsOpen(false)}>Close</button>
+                </div>
+                <pre className="bg-slate-100 rounded p-4 text-sm text-slate-800 whitespace-pre-wrap mb-4">{formattedPositions}</pre>
+                <button className="px-3 py-2 rounded-xl bg-brand-600 text-white" onClick={()=>navigator.clipboard.writeText(formattedPositions)}>Copy</button>
+              </div>
+            </div>
+          )}
+
           {/* Console modal */}
           {consoleOpen && (
             <div className="fixed inset-0 z-50">
@@ -1002,24 +1026,20 @@
                     <label>Gain <input type="number" className="border rounded px-2 py-1 w-24" value={tiltGain} step="0.05" min="0.05" max="1.5" onChange={e=>setTiltGain(parseFloat(e.target.value)||0.05)}/></label>
                   </div>
                 </div>
-                <div className="mt-4 text-center text-[10px] text-slate-300 select-none cursor-pointer" onDoubleClick={()=>setBacklashOpen(!backlashOpen)}>fw</div>
-                {backlashOpen && (
-                  <div className="mt-4">
-                    <div className="text-sm font-semibold mb-1">Backlash calibration</div>
-                    <div className="text-xs text-slate-600 mb-2">Extra degrees added on direction change.</div>
-                    {['A','B','C','D'].map(m=>(
-                      <label key={m} className="flex items-center gap-2 mb-2">
-                        <span className="w-4">{m}</span>
-                        <input type="number" step="0.1" className="border rounded px-2 py-1 w-24" value={backlash[m] ?? 0} onChange={e=>setBacklash({...backlash,[m]:parseFloat(e.target.value)||0})} />
-                        <span className="text-xs text-slate-500">last: {lastDir[m] ?? 0}</span>
-                      </label>
-                    ))}
-                    <div className="mt-2 flex gap-2">
-                      <button className="px-3 py-2 rounded-xl bg-brand-600 text-white" onClick={saveBacklash}>Save</button>
-                      <button className="px-3 py-2 rounded-xl bg-white border" onClick={()=>setBacklashOpen(false)}>Close</button>
-                    </div>
+                <div className="mt-4">
+                  <div className="text-sm font-semibold mb-1">Backlash calibration</div>
+                  <div className="text-xs text-slate-600 mb-2">Extra degrees added on direction change.</div>
+                  {['A','B','C','D'].map(m=>(
+                    <label key={m} className="flex items-center gap-2 mb-2">
+                      <span className="w-4">{m}</span>
+                      <input type="number" step="0.1" className="border rounded px-2 py-1 w-24" value={backlash[m] ?? 0} onChange={e=>setBacklash({...backlash,[m]:parseFloat(e.target.value)||0})} />
+                      <span className="text-xs text-slate-500">last: {lastDir[m] ?? 0}</span>
+                    </label>
+                  ))}
+                  <div className="mt-2">
+                    <button className="px-3 py-2 rounded-xl bg-brand-600 text-white" onClick={saveBacklash}>Save</button>
                   </div>
-                )}
+                </div>
               </aside>
             </div>
           )}
