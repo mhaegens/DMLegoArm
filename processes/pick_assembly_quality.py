@@ -10,22 +10,30 @@ def run(arm) -> Any:
     # Backlash is measured in degrees so 5 rotations == 5 * 360
     arm.set_backlash({"D": 5 * 360})
 
-    # The provided pose values are in raw motor degrees and are all multiples of
-    # 360.  Large degree values appear to be ignored by the Build HAT firmware,
-    # resulting in tiny movements.  Converting to rotations and using the
-    # ``units="rotations"`` mode keeps the commands within the supported range
-    # and produces the expected motion.
+    # Poses expressed directly in rotations for each motor.
     steps = [
-        {"A": 0, "B": 0, "C": 0, "D": 0},
-        {"A": -20160 / 360, "B": 0, "C": -37800 / 360, "D": 43920 / 360},
-        {"A": -21600 / 360, "B": 0, "C": -34920 / 360, "D": 43920 / 360},
-        {"A": -21600 / 360, "B": 14400 / 360, "C": -9720 / 360, "D": 3600 / 360},
-        {"A": -21600 / 360, "B": 3240 / 360, "C": -29880 / 360, "D": -39600 / 360},
-        {"A": -20880 / 360, "B": 3240 / 360, "C": 2520 / 360, "D": -39600 / 360},
-        {"A": 0, "B": 0, "C": 0, "D": 0},
+        {"A": 0.0, "B": 0.0, "C": 0.0, "D": 0.0},  # home
+        {"A": 0.0, "B": 22.0, "C": -84.0, "D": 186.0},  # Pick Right S1
+        {"A": -4.0, "B": 0.0, "C": -184.0, "D": 186.0},  # Pick Right S2
+        {"A": -4.0, "B": 22.0, "C": -84.0, "D": 186.0},  # Pick Right S3
+        {"A": -4.0, "B": 0.0, "C": 0.0, "D": 0.0},  # Go Home for all but A
+        {"A": 0.0, "B": 22.0, "C": -84.0, "D": -186.0},  # Pick Left S1
+        {"A": -4.0, "B": 0.0, "C": -184.0, "D": -186.0},  # Pick Left S2
+        {"A": -4.0, "B": 22.0, "C": -84.0, "D": -186.0},  # Pick Left S3
+        {"A": 0.0, "B": 0.0, "C": 0.0, "D": 0.0},  # final home
     ]
 
     result = None
+    # Sequentially move each motor to its target for every step.
     for pose in steps:
-        result = arm.move("absolute", pose, speed=speed, units="rotations")
+        for motor in ("A", "B", "C", "D"):
+            target = pose.get(motor)
+            if target is None:
+                continue
+            while True:
+                result = arm.move("absolute", {motor: target}, speed=speed, units="rotations")
+                # arm.move returns degrees; convert to rotations for comparison
+                new_rot = result["new_abs"][motor] / 360.0
+                if abs(new_rot - target) <= 1e-6:
+                    break
     return result
