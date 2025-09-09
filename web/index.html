@@ -129,10 +129,16 @@
       const [positionsOpen,setPositionsOpen]=useState(false);
       const [backlash,setBacklash]=useState({A:0,B:0,C:0,D:0});
       const [lastDir,setLastDir]=useState({A:0,B:0,C:0,D:0});
-      const formattedPositions = useMemo(
-        () => motors.map(m => `${m.name}: ${(m.pos/360).toFixed(2).replace('.', ',')} rot`).join('\n'),
-        [motors]
-      );
+        const formattedPositions = useMemo(
+          () =>
+            motors
+              .map(m => {
+                const rot = ((m.abs ?? m.pos) / 360).toFixed(2).replace('.', ',');
+                return `${m.name}: ${rot} rot`;
+              })
+              .join('\n'),
+          [motors]
+        );
 
       // Pill action menu (J/C/B) state
       const [pillMenu,setPillMenu]=useState({open:false, motor:null, x:0, y:0});
@@ -281,11 +287,11 @@
           const s = await api("GET","/v1/arm/state", undefined, {log:verbose});
           if(s?.abs_degrees){
             const ordered = Object.entries(s.abs_degrees)
-              .map(([k,v])=>({name:k,pos:normalizeDeg(+v)}))
+              .map(([k,v])=>({name:k,pos:normalizeDeg(+v),abs:+v}))
               .sort((a,b)=>MOTOR_ORDER.indexOf(a.name)-MOTOR_ORDER.indexOf(b.name))
               .map((m,i)=>({id:i+1,...m}));
             setMotors(ordered);
-            if(verbose) console.log("Current positions:", ordered.map(m=>({name:m.name,pos:m.pos})));
+            if(verbose) console.log("Current positions:", ordered.map(m=>({name:m.name,pos:m.pos,abs:m.abs})));
             const sample = { t: now(), angles: Object.fromEntries(ordered.map(m=>[m.name, m.pos])) };
             setRing(prev => {
               const arr = [...prev, sample];
@@ -339,7 +345,17 @@
         }
         const joints={}; joints[name]=deltaDeg;
         await api("POST","/v1/arm/move",{mode:"relative",joints,speed},{queueIfOffline:true}).catch(()=>{});
-        setMotors(p=>p.map(x=>x.name===name?{...x,pos:normalizeDeg(x.pos+deltaDeg)}:x));
+        setMotors(p=>
+          p.map(x =>
+            x.name === name
+              ? {
+                  ...x,
+                  pos: normalizeDeg(x.pos + deltaDeg),
+                  abs: (x.abs ?? x.pos) + deltaDeg,
+                }
+              : x
+          )
+        );
       }
 
       async function refresh(verbose=false){
