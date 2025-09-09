@@ -259,8 +259,15 @@
 
       // Health & state polling
       async function checkHealth(){
-        try{ await api("GET","/v1/health", undefined, {log:false}); setConnected(true); }
-        catch{ setConnected(false); }
+        console.log("Checking health...");
+        try{
+          await api("GET","/v1/health", undefined, {log:false});
+          setConnected(true);
+          console.log("Health check: OK");
+        } catch {
+          setConnected(false);
+          console.warn("Health check: FAILED");
+        }
       }
 
       async function updatePositions(){
@@ -325,7 +332,10 @@
         setMotors(p=>p.map(x=>x.name===name?{...x,pos:normalizeDeg(x.pos+deltaDeg)}:x));
       }
 
-      async function refresh(){ await updatePositions(); }
+      async function refresh(){
+        console.log("Refreshing positions...");
+        await updatePositions();
+      }
 
       async function runTuner({joint="A", amplitude=5, speeds=[20,40,60,80], settleMs=350}){
         const results=[];
