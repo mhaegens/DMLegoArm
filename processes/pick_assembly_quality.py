@@ -7,8 +7,8 @@ def run(arm) -> Any:
     """Execute the pick-assembly-quality workflow."""
     speed = 100  # top speed
 
-    # Backlash is measured in degrees so 5 rotations == 5 * 360
-    arm.set_backlash({"D": 5 * 360})
+    # Use existing backlash calibration configured on the arm
+    # rather than overriding it here.
 
     # Poses expressed directly in rotations for each motor.
     steps = [
