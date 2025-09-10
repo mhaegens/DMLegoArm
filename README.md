@@ -265,6 +265,24 @@ Update backlash calibration; values are saved to `arm_calibration.json` and appl
 { "A": 10, "D": 2160 }
 ```
 
+### `GET /v1/arm/calibration`  *(auth)*
+
+Returns calibration progress and whether the controller is ready.
+
+```json
+{ "points": {"p1": {"A":0}}, "calibrated": false }
+```
+
+### `POST /v1/arm/calibration`  *(auth)*
+
+Record calibration points or finalize. To store the current joint angles for a point, send `{ "point": "p1" }` where `p1`..`p4` correspond to the four required positions. After all points are collected, finalize with `{ "finalize": true }` to derive joint limits and automatically move to the computed home pose.
+
+```bash
+curl -X POST https://<ngrok>/v1/arm/calibration \\
+  -H "content-type: application/json" -H "x-api-key: $KEY" \\
+  -d '{"point":"p1"}'
+```
+
 ### `POST /v1/arm/pose`  *(auth)*
 
 Go to a named pose. Built-in names: `home`, `pick_left`, `pick_right`, `place_left`, `place_right`.
