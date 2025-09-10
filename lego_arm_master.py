@@ -492,6 +492,7 @@ class ArmController:
                     }
                 else:
                     home = {"A": 0, "B": 0, "C": 0, "D": 0}
+            self.stop_event.clear()
             return self.move("absolute", home, speed=speed, timeout_s=timeout_s)
         finally:
             self._release_busy()

@@ -27,18 +27,26 @@ def run(arm) -> Any:
         {"A": "open", "B": "min", "C": "max", "D": "neutral"},  # final home
     ]
 
-    last_target = None
+    # Pre-resolve the pose names once and reuse the exact coordinates.
+    abs_steps = [arm.resolve_pose(p) for p in steps]
+
     result = None
-    for i, pose in enumerate(steps):
-        if last_target:
-            ok, errs = arm.verify_at(last_target)
+    for i, target in enumerate(abs_steps):
+        if i > 0:
+            ok, errs = arm.verify_at(abs_steps[i - 1])
             if not ok:
-                logger.warning("DRIFT before step %d: %s", i, errs)
-                arm.move("absolute", last_target, speed=40, timeout_s=60)
-                ok2, errs2 = arm.verify_at(last_target)
-                if not ok2:
-                    logger.error("DRIFT persists before step %d: %s; recovering to home", i, errs2)
+                # If D is wildly off, treat as bad reference and recover.
+                if errs.get("D", 0) >= 720:
+                    logger.error(
+                        "D reference drift (%.1f°) before step %d; recovering", errs["D"], i
+                    )
                     arm.recover_to_home(speed=30, timeout_s=90.0)
-        result = arm.move("absolute", pose, speed=speed)
-        last_target = arm.resolve_pose(pose)
+                else:
+                    logger.warning("DRIFT before step %d: %s; nudging back", i, errs)
+                    arm.move("absolute", abs_steps[i - 1], speed=40, timeout_s=60)
+                    ok2, _ = arm.verify_at(abs_steps[i - 1])
+                    if not ok2:
+                        logger.error("DRIFT persists before step %d; recovering", i)
+                        arm.recover_to_home(speed=30, timeout_s=90.0)
+        result = arm.move("absolute", target, speed=speed)
     return result
