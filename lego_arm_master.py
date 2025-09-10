@@ -368,9 +368,11 @@ class ArmController:
             return {"points": {j: pts.copy() for j, pts in self.points.items()}}
 
     def reset_calibration(self) -> dict:
-        """Clear recorded calibration points and mark arm uncalibrated."""
+        """Clear recorded calibration points, reset limits and mark arm uncalibrated."""
         with self.lock:
             self.points = {j: {} for j in self.motors}
+            # Remove any soft limits so joints can move freely until finalized
+            self.limits = {j: None for j in self.motors}
             self.calibrated = False
             self.save_calibration()
             return self.calibration_status()
