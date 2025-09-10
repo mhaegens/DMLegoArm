@@ -446,6 +446,8 @@ function post(p,b){return call('POST',p,b,true)}
 
 ## Troubleshooting
 
+Server logs are written to `/var/log/legoarm/app.log`. Consult this file for detailed information when diagnosing issues.
+
 **Health works locally but not via ngrok**
 
 * You used `https://<ngrok>:8000/...` → **remove the `:8000`**.
