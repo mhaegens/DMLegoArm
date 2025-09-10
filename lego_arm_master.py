@@ -8,8 +8,9 @@ import threading
 import queue
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse
-from typing import Dict, Optional, Literal
+from typing import Dict, Optional, Literal, Union
 import mimetypes
+import re
 
 # location of bundled web UI
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
@@ -78,11 +79,21 @@ class ArmController:
         self.backlash: Dict[str, float] = {j: 0.0 for j in self.motors}
         # Track last movement direction per motor: -1, 0, 1
         self._last_dir: Dict[str, int] = {j: 0 for j in self.motors}
+        # Named points per joint (e.g., "closed", "home").  Populated after
+        # calibration and persisted in ``arm_calibration.json``.
+        self.points: Dict[str, Dict[str, float]] = {j: {} for j in self.motors}
         try:
             with open(self._calib_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self.backlash.update({j: float(data.get("backlash", {}).get(j, 0.0)) for j in self.motors})
             self._last_dir.update({j: int(data.get("last_dir", {}).get(j, 0)) for j in self.motors})
+            pts = data.get("points", {})
+            for j, mp in pts.items():
+                if j in self.points:
+                    try:
+                        self.points[j] = {k: float(v) for k, v in mp.items()}
+                    except Exception:
+                        pass
         except FileNotFoundError:
             pass
         except Exception:
@@ -164,7 +175,9 @@ class ArmController:
     def save_calibration(self) -> None:
         try:
             with open(self._calib_path, "w", encoding="utf-8") as f:
-                json.dump({"backlash": self.backlash, "last_dir": self._last_dir}, f)
+                json.dump({"backlash": self.backlash,
+                           "last_dir": self._last_dir,
+                           "points": self.points}, f)
         except Exception:
             pass
 
@@ -182,18 +195,41 @@ class ArmController:
     def last_direction(self) -> dict:
         return self._last_dir.copy()
 
-    def move(self, mode: Literal["relative", "absolute"], joints: Dict[str, float], speed: int,
+    def resolve_point(self, joint: str, value: str) -> float:
+        """Return absolute degrees for a named point expression.
+
+        ``value`` may be a point name like ``"closed"`` or an expression
+        ``"closed - 10"``.  Names are case-insensitive and may contain spaces
+        which will be normalized to underscores.
+        """
+        m = re.fullmatch(r"\s*([A-Za-z_ ]+?)(?:\s*([+-])\s*([0-9]+(?:\.[0-9]+)?))?\s*", value)
+        if not m:
+            raise ValueError(f"Invalid point expression '{value}'")
+        base = m.group(1).strip().lower().replace(" ", "_")
+        offset = float(m.group(3)) if m.group(3) else 0.0
+        if m.group(2) == '-':
+            offset = -offset
+        base_val = self.points.get(joint, {}).get(base)
+        if base_val is None:
+            raise ValueError(f"Unknown point '{base}' for joint {joint}")
+        return base_val + offset
+
+    def move(self, mode: Literal["relative", "absolute"], joints: Dict[str, Union[float, str]], speed: int,
              timeout_s: Optional[float] = None, units: Literal["degrees", "rotations"] = "degrees"):
         start = time.time()
         with self.lock:
             if self.stop_event.is_set():
                 self.stop_event.clear()
                 raise InterruptedError("Movement interrupted")
-            joints_deg = {j: (deg * 360.0 if units == "rotations" else deg) for j, deg in joints.items()}
-            if mode == "relative":
-                plan = {j: self.clamp(j, self.current_abs[j] + deg) - self.current_abs[j] for j, deg in joints_deg.items()}
-            else:
-                plan = {j: self.clamp(j, deg) - self.current_abs[j] for j, deg in joints_deg.items()}
+            targets: Dict[str, float] = {}
+            for j, raw in joints.items():
+                if isinstance(raw, str):
+                    target = self.resolve_point(j, raw)
+                else:
+                    deg = float(raw) * (360.0 if units == "rotations" else 1.0)
+                    target = self.current_abs[j] + deg if mode == "relative" else deg
+                targets[j] = self.clamp(j, target)
+            plan = {j: tgt - self.current_abs[j] for j, tgt in targets.items()}
             for j, delta in plan.items():
                 if self.stop_event.is_set():
                     self.stop_event.clear()
@@ -206,11 +242,7 @@ class ArmController:
                 if backlash and self._last_dir[j] != 0 and dir_now != self._last_dir[j]:
                     run_delta += backlash * dir_now
                 m = self.motors[j]
-                if units == "rotations":
-                    target = run_delta / 360.0
-                    m.run_for_rotations(target, speed=speed, blocking=True)
-                else:
-                    m.run_for_degrees(run_delta, speed=speed, blocking=True)
+                m.run_for_degrees(run_delta, speed=speed, blocking=True)
                 if self.stop_event.is_set():
                     self.stop_event.clear()
                     raise InterruptedError("Movement interrupted")
@@ -251,16 +283,24 @@ class ArmController:
             }
             home = {"A": p4["A"], "B": p1["B"], "C": p4["C"], "D": p1["D"]}
             self.calibration_points["home"] = home
+            self.points = {
+                "A": {"closed": p1["A"], "open_max": p4["A"]},
+                "B": {"minimum": p1["B"], "extended_max": p4["B"]},
+                "C": {"minimum": p1["C"], "extended_max": p4["C"]},
+                "D": {"home": p1["D"], "assembly": p2["D"], "quality": p3["D"]},
+            }
             self.calibrated = True
+            self.save_calibration()
         # Move to the derived home position outside the lock
         self.move("absolute", home, speed=40)
-        return {"limits": self.limits.copy(), "home": home}
+        return {"limits": self.limits.copy(), "home": home, "points": self.points.copy()}
 
     def calibration_status(self) -> dict:
         with self.lock:
             return {
                 "points": self.calibration_points.copy(),
                 "calibrated": self.calibrated,
+                "named_points": {j: pts.copy() for j, pts in self.points.items()},
             }
 
     def goto_pose(self, name: str, speed: int):
@@ -301,6 +341,7 @@ class ArmController:
             "motors": list(self.motors.keys()),
             "backlash": self.backlash.copy(),
             "calibrated": self.calibrated,
+            "points": {j: pts.copy() for j, pts in self.points.items()},
         }
 
 arm = ArmController()
