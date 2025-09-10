@@ -16,6 +16,14 @@ WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 
 from processes import PROCESS_MAP
 
+# Optional Bluetooth gamepad support (requires `evdev`)
+try:  # pragma: no cover - optional dependency
+    from evdev import InputDevice, list_devices, ecodes  # type: ignore
+except Exception:  # pragma: no cover - device might not exist
+    InputDevice = None  # type: ignore
+    list_devices = None  # type: ignore
+    ecodes = None  # type: ignore
+
 # ---------------------------
 # Hardware abstraction layer
 # ---------------------------
@@ -250,6 +258,67 @@ class ArmController:
         }
 
 arm = ArmController()
+# ---------------------------
+# Bluetooth gamepad control
+# ---------------------------
+
+def _gamepad_loop(device_path: Optional[str] = None) -> None:  # pragma: no cover - hardware dependent
+    """Read joystick events and translate into motor movements."""
+    if InputDevice is None or list_devices is None or ecodes is None:
+        print("evdev not available; gamepad disabled")
+        return
+    path = device_path
+    if not path:
+        devices = list_devices()
+        if not devices:
+            print("No gamepad device found")
+            return
+        path = devices[0]
+    try:
+        dev = InputDevice(path)
+    except Exception as e:
+        print(f"Failed to open gamepad {path}: {e}")
+        return
+    axis_map = {
+        ecodes.ABS_X: "D",  # base rotation
+        ecodes.ABS_Y: "C",  # elbow
+        ecodes.ABS_RX: "B",  # wrist
+        ecodes.ABS_RY: "A",  # gripper
+    }
+    abs_ranges: Dict[int, tuple[int, int]] = {}
+    for code in axis_map:
+        try:
+            info = dev.absinfo(code)
+            abs_ranges[code] = (info.min, info.max)
+        except Exception:
+            abs_ranges[code] = (-32768, 32767)
+    for event in dev.read_loop():
+        if event.type != ecodes.EV_ABS or event.code not in axis_map:
+            continue
+        lo, hi = abs_ranges[event.code]
+        mid = (lo + hi) / 2.0
+        span = (hi - lo) / 2.0 or 1.0
+        norm = (event.value - mid) / span
+        if abs(norm) < 0.1:
+            continue
+        joint = axis_map[event.code]
+        deg = norm * 5.0  # small step per event
+        speed = max(10, int(abs(norm) * 100))
+        try:
+            arm.move("relative", {joint: deg}, speed)
+        except Exception:
+            continue
+
+
+def _start_gamepad_thread() -> threading.Thread | None:
+    device = os.getenv("GAMEPAD_DEVICE")
+    t = threading.Thread(target=_gamepad_loop, args=(device,), daemon=True)
+    t.start()
+    return t
+
+
+if os.getenv("ENABLE_GAMEPAD", "0") == "1":
+    _start_gamepad_thread()
 # ---------------------------
 # Ops & Idempotency
 # ---------------------------
