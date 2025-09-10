@@ -33,8 +33,8 @@ def run(arm) -> Any:
             if target is None:
                 continue
             while True:
-                target_deg = target * 360.0
-                result = arm.move("absolute", {motor: target_deg}, speed=speed, units="degrees")
+                target_deg = target
+                result = arm.move("relative", {motor: target_deg}, speed=speed, units="rotations")
                 # arm.move returns degrees; compare against degree target
                 new_deg = result["new_abs"][motor]
                 if abs(new_deg - target_deg) <= 1e-6:
