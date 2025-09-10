@@ -293,6 +293,10 @@
         await api("POST","/v1/arm/calibration",{finalize:true}).catch(()=>{});
         fetchCalibration();
       }
+      async function resetCalibration(){
+        await api("POST","/v1/arm/calibration",{reset:true}).catch(()=>{});
+        fetchCalibration();
+      }
       useEffect(()=>{ if(calibOpen) fetchCalibration(); },[calibOpen]);
 
       useEffect(()=>{
@@ -1103,7 +1107,10 @@
                     </div>
                   ))}
                 </div>
-                <button className="mt-2 px-3 py-2 rounded-xl bg-brand-600 text-white disabled:opacity-50" disabled={!allSet} onClick={finalizeCalibration}>Finalize</button>
+                <div className="mt-2 flex gap-2">
+                  <button className="px-3 py-2 rounded-xl bg-slate-200 text-slate-700 hover:bg-slate-300" onClick={resetCalibration}>Reset</button>
+                  <button className="px-3 py-2 rounded-xl bg-brand-600 text-white disabled:opacity-50" disabled={!allSet} onClick={finalizeCalibration}>Finalize</button>
+                </div>
               </aside>
             </div>);
           })()}
