@@ -284,9 +284,9 @@ class ArmController:
             home = {"A": p4["A"], "B": p1["B"], "C": p4["C"], "D": p1["D"]}
             self.calibration_points["home"] = home
             self.points = {
-                "A": {"closed": p1["A"], "open_max": p4["A"]},
-                "B": {"minimum": p1["B"], "extended_max": p4["B"]},
-                "C": {"minimum": p1["C"], "extended_max": p4["C"]},
+                "A": {"closed": p1["A"], "open": p4["A"]},
+                "B": {"min": p1["B"], "max": p4["B"]},
+                "C": {"min": p1["C"], "max": p4["C"]},
                 "D": {"home": p1["D"], "assembly": p2["D"], "quality": p3["D"]},
             }
             self.calibrated = True
