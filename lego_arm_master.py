@@ -367,6 +367,14 @@ class ArmController:
             self.save_calibration()
             return {"points": {j: pts.copy() for j, pts in self.points.items()}}
 
+    def reset_calibration(self) -> dict:
+        """Clear recorded calibration points and mark arm uncalibrated."""
+        with self.lock:
+            self.points = {j: {} for j in self.motors}
+            self.calibrated = False
+            self.save_calibration()
+            return self.calibration_status()
+
     def finalize_calibration(self) -> dict:
         """Derive joint limits and home pose from recorded named points and move."""
         if not self._acquire_busy():
@@ -975,6 +983,11 @@ class Handler(BaseHTTPRequestHandler):
                 return json_response(self, resp)
 
             if path == "/v1/arm/calibration":
+                if body.get("reset"):
+                    res = arm.reset_calibration()
+                    resp = {"ok": True, "data": res}
+                    idem_store(self, resp)
+                    return json_response(self, resp)
                 if body.get("finalize"):
                     try:
                         res = arm.finalize_calibration()
