@@ -235,7 +235,8 @@ Lists available endpoints, poses, motors.
 
 ### `GET /v1/arm/state`  *(auth)*
 
-Returns current absolute degrees, software limits, motors and backlash calibration.
+Returns current absolute degrees, software limits, motors, backlash calibration,
+and any named points captured during calibration.
 
 ```json
 {
@@ -244,7 +245,8 @@ Returns current absolute degrees, software limits, motors and backlash calibrati
     "abs_degrees": {"A": 0, "B": 0, "C": 0, "D": 0},
     "limits": {"A": [-360,360], "B": [-180,180], "C": [-180,180], "D": [-90,90]},
     "motors": ["A","B","C","D"],
-    "backlash": {"A":0,"B":0,"C":0,"D":0}
+    "backlash": {"A":0,"B":0,"C":0,"D":0},
+    "points": {"A": {"closed": 0, "open_max": 90}}
   }
 }
 ```
@@ -275,7 +277,7 @@ Returns calibration progress and whether the controller is ready.
 
 ### `POST /v1/arm/calibration`  *(auth)*
 
-Record calibration points or finalize. To store the current joint angles for a point, send `{ "point": "p1" }` where `p1`..`p4` correspond to the four required positions. After all points are collected, finalize with `{ "finalize": true }` to derive joint limits and automatically move to the computed home pose.
+Record calibration points or finalize. To store the current joint angles for a point, send `{ "point": "p1" }` where `p1`..`p4` correspond to the four required positions. After all points are collected, finalize with `{ "finalize": true }` to derive joint limits, persist named reference points (e.g. `closed`, `assembly`) and automatically move to the computed home pose.
 
 ```bash
 curl -X POST https://<ngrok>/v1/arm/calibration \\
@@ -295,7 +297,7 @@ curl -X POST https://<ngrok>/v1/arm/pose \
 
 ### `POST /v1/arm/move`  *(auth)*
 
-Relative or absolute joint moves (`A/B/C/D` in **degrees** by default). Use `"units":"rotations"` to specify counts of full rotations instead.
+Relative or absolute joint moves (`A/B/C/D` in **degrees** by default). Use `"units":"rotations"` to specify counts of full rotations instead. Joint targets may also be provided as strings referencing calibrated point names, e.g. `{ "A": "closed - 10" }`.
 
 ```json
 {
