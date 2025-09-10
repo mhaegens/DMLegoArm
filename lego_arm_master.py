@@ -136,9 +136,9 @@ class ArmController:
             "C": None,
             "D": None,
         }
-        # Calibration points captured from the UI.  ``calibrated`` becomes
-        # True only after all points are recorded and limits/home are derived.
-        self.calibration_points: Dict[str, Dict[str, float]] = {}
+        # Calibration status. Named points are captured per joint via the UI and
+        # persisted. ``calibrated`` becomes True once all required points are
+        # recorded and limits/home are derived.
         self.calibrated: bool = False
         self.lock = threading.Lock()
         self.stop_event = threading.Event()
@@ -357,57 +357,84 @@ class ArmController:
             self._release_busy()
 
     # ----- Calibration helpers -----
-    def record_calibration_point(self, name: str) -> dict:
-        """Store the current absolute positions under ``name``."""
+    def record_named_point(self, joint: str, name: str) -> dict:
+        """Store the current position of ``joint`` under ``name``."""
         with self.lock:
-            self.calibration_points[str(name)] = self.current_abs.copy()
-            return {"points": self.calibration_points.copy()}
+            if joint not in self.motors:
+                raise ValueError(f"Unknown joint '{joint}'")
+            norm = name.strip().lower().replace(" ", "_")
+            self.points[joint][norm] = self.current_abs[joint]
+            self.save_calibration()
+            return {"points": {j: pts.copy() for j, pts in self.points.items()}}
 
     def finalize_calibration(self) -> dict:
-        """Derive joint limits and home pose from recorded points and move."""
+        """Derive joint limits and home pose from recorded named points and move."""
         if not self._acquire_busy():
             raise RuntimeError("BUSY")
         try:
-            required = {"p1", "p2", "p3", "p4"}
+            required = {
+                "A": {"open", "closed"},
+                "B": {"min", "pick", "max"},
+                "C": {"min", "pick", "max"},
+                "D": {"assembly", "neutral", "quality"},
+            }
             with self.lock:
-                if not required.issubset(self.calibration_points):
-                    missing = required - set(self.calibration_points)
-                    raise ValueError(f"Missing calibration points: {', '.join(sorted(missing))}")
-                p1 = self.calibration_points["p1"]
-                p2 = self.calibration_points["p2"]
-                p3 = self.calibration_points["p3"]
-                p4 = self.calibration_points["p4"]
+                for j, names in required.items():
+                    missing = [n for n in names if n not in self.points.get(j, {})]
+                    if missing:
+                        raise ValueError(
+                            f"Missing points for joint {j}: {', '.join(sorted(missing))}"
+                        )
+                pts = self.points
                 self.limits = {
-                    "A": (min(p1["A"], p4["A"]), max(p1["A"], p4["A"])),
-                    "B": (min(p1["B"], p4["B"]), max(p1["B"], p4["B"])),
-                    "C": (min(p1["C"], p4["C"]), max(p1["C"], p4["C"])),
+                    "A": (
+                        min(pts["A"]["open"], pts["A"]["closed"]),
+                        max(pts["A"]["open"], pts["A"]["closed"]),
+                    ),
+                    "B": (
+                        min(pts["B"]["min"], pts["B"]["max"]),
+                        max(pts["B"]["min"], pts["B"]["max"]),
+                    ),
+                    "C": (
+                        min(pts["C"]["min"], pts["C"]["max"]),
+                        max(pts["C"]["min"], pts["C"]["max"]),
+                    ),
                     "D": (
-                        min(p1["D"], p2["D"], p3["D"], p4["D"]),
-                        max(p1["D"], p2["D"], p3["D"], p4["D"]),
+                        min(
+                            pts["D"]["assembly"],
+                            pts["D"]["neutral"],
+                            pts["D"]["quality"],
+                        ),
+                        max(
+                            pts["D"]["assembly"],
+                            pts["D"]["neutral"],
+                            pts["D"]["quality"],
+                        ),
                     ),
                 }
-                home = {"A": p4["A"], "B": p1["B"], "C": p4["C"], "D": p1["D"]}
-                self.calibration_points["home"] = home
-                self.points = {
-                    "A": {"closed": p1["A"], "open": p4["A"]},
-                    "B": {"min": p1["B"], "pick": p2["B"], "max": p4["B"]},
-                    "C": {"min": p1["C"], "max": p4["C"]},
-                    "D": {"neutral": p1["D"], "assembly": p2["D"], "quality": p3["D"]},
+                home = {
+                    "A": pts["A"]["open"],
+                    "B": pts["B"]["min"],
+                    "C": pts["C"]["max"],
+                    "D": pts["D"]["neutral"],
                 }
                 self.calibrated = True
                 self.save_calibration()
             # Move to the derived home position outside the lock
             self.move("absolute", home, speed=40)
-            return {"limits": self.limits.copy(), "home": home, "points": self.points.copy()}
+            return {
+                "limits": self.limits.copy(),
+                "home": home,
+                "points": {j: pts.copy() for j, pts in self.points.items()},
+            }
         finally:
             self._release_busy()
 
     def calibration_status(self) -> dict:
         with self.lock:
             return {
-                "points": self.calibration_points.copy(),
+                "points": {j: pts.copy() for j, pts in self.points.items()},
                 "calibrated": self.calibrated,
-                "named_points": {j: pts.copy() for j, pts in self.points.items()},
             }
 
     def goto_pose(self, name: str, speed: int):
@@ -948,11 +975,6 @@ class Handler(BaseHTTPRequestHandler):
                 return json_response(self, resp)
 
             if path == "/v1/arm/calibration":
-                if body.get("point"):
-                    res = arm.record_calibration_point(str(body.get("point")))
-                    resp = {"ok": True, "data": res}
-                    idem_store(self, resp)
-                    return json_response(self, resp)
                 if body.get("finalize"):
                     try:
                         res = arm.finalize_calibration()
@@ -961,7 +983,19 @@ class Handler(BaseHTTPRequestHandler):
                         return json_response(self, resp)
                     except Exception as e:
                         return json_response(self, {"ok": False, "error": {"code": "CALIB_ERROR", "message": str(e)}}, 400)
-                return json_response(self, {"ok": False, "error": {"code": "BAD_CALIB", "message": "Provide point or finalize"}}, 400)
+                if body.get("joint") and body.get("name"):
+                    res = arm.record_named_point(str(body["joint"]), str(body["name"]))
+                    resp = {"ok": True, "data": res}
+                    idem_store(self, resp)
+                    return json_response(self, resp)
+                return json_response(
+                    self,
+                    {
+                        "ok": False,
+                        "error": {"code": "BAD_CALIB", "message": "Provide joint/name or finalize"},
+                    },
+                    400,
+                )
 
             if path == "/v1/arm/recover":
                 speed = int(body.get("speed", 30))
