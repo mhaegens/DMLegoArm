@@ -13,13 +13,15 @@ def run(arm) -> Any:
     # Poses expressed directly in rotations for each motor.
     steps = [
         {"A": 0.0, "B": 0.0, "C": 0.0, "D": 0.0},  # home
-        {"A": 0.0, "B": 22.0, "C": -84.0, "D": 186.0},  # Pick Right S1
-        {"A": -4.0, "B": 0.0, "C": -184.0, "D": 186.0},  # Pick Right S2
-        {"A": -4.0, "B": 22.0, "C": -84.0, "D": 186.0},  # Pick Right S3
-        {"A": -4.0, "B": 0.0, "C": 0.0, "D": 0.0},  # Go Home for all but A
-        {"A": 0.0, "B": 22.0, "C": -84.0, "D": -186.0},  # Pick Left S1
-        {"A": -4.0, "B": 0.0, "C": -184.0, "D": -186.0},  # Pick Left S2
-        {"A": -4.0, "B": 22.0, "C": -84.0, "D": -186.0},  # Pick Left S3
+        {"A": 0.0, "B": 22.0, "C": -84.0, "D": 113.0},  # Pick Right S1
+        {"A": -4.0, "B": 0.0, "C": -124.0, "D": 113.0},  # Pick Right S2
+        {"A": -6.0, "B": 0.0, "C": -129.0, "D": 113.0},  # Grab
+        {"A": -4.0, "B": 22.0, "C": -84.0, "D": 113.0},  # Pick Right S3
+        {"A": -6.0, "B": 0.0, "C": 0.0, "D": 0.0},  # Go Home for all but A
+        {"A": -6.0, "B": 22.0, "C": -84.0, "D": -113.0},  # Drop Left S1
+        {"A": -6.0, "B": 0.0, "C": -124.0, "D": -113.0},  # Drop Left S2
+        {"A": -6.0, "B": 0.0, "C": -129.0, "D": -113.0},  # Release
+        {"A": -4.0, "B": 22.0, "C": -84.0, "D": -113.0},  # Drop Left S3
         {"A": 0.0, "B": 0.0, "C": 0.0, "D": 0.0},  # final home
     ]
 
