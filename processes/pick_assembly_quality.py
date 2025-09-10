@@ -1,42 +1,30 @@
-"""Pick from assembly side and place on quality side using absolute poses."""
+"""Pick from assembly side and place on quality side using named points."""
 
 from typing import Any
 
 
 def run(arm) -> Any:
-    """Execute the pick-assembly-quality workflow."""
+    """Execute the pick-assembly-quality workflow using point names."""
     speed = 100  # top speed
 
-    # Use existing backlash calibration configured on the arm
-    # rather than overriding it here.
-
-    # Poses expressed in rotations for each motor.
+    # Each pose references previously calibrated point names rather than raw
+    # numeric values.  Offsets are expressed relative to those points and are
+    # resolved by :meth:`ArmController.resolve_point`.
     steps = [
-        {"A": 0.0, "B": 0.0, "C": 0.0, "D": 0.0},  # home
-        {"A": 0.0, "B": 22.0, "C": -84.0, "D": 113.0},  # Pick Right S1
-        {"A": -4.0, "B": 0.0, "C": -124.0, "D": 113.0},  # Pick Right S2
-        {"C": -129.0, "A": -6.0, "B": 0.0, "D": 113.0},  # Grab
-        {"A": -4.0, "B": 22.0, "C": -84.0, "D": 113.0},  # Pick Right S3
-        {"A": -6.0, "B": 0.0, "C": 0.0, "D": 0.0},  # Go Home for all but A
-        {"A": -6.0, "B": 22.0, "C": -84.0, "D": -113.0},  # Drop Left S1
-        {"A": -6.0, "B": 0.0, "C": -124.0, "D": -113.0},  # Drop Left S2
-        {"A": -6.0, "B": 0.0, "C": -129.0, "D": -113.0},  # Release
-        {"A": -4.0, "B": 22.0, "C": -84.0, "D": -113.0},  # Drop Left S3
-        {"A": 0.0, "B": 0.0, "C": 0.0, "D": 0.0},  # final home
+        {"A": "open", "B": "min", "C": "max", "D": "home"},  # Start at home
+        {"A": "open", "B": "min+22", "C": "max-84", "D": "assembly"},  # Pick Right S1
+        {"A": "open-4", "B": "min", "C": "max-124", "D": "assembly"},  # Pick Right S2
+        {"A": "closed+1", "B": "min", "C": "max-129", "D": "assembly"},  # Grab
+        {"A": "closed+1", "B": "min+22", "C": "max-84", "D": "assembly"},  # Pick Right S3
+        {"A": "closed+1", "B": "min", "C": "min", "D": "home"},  # Go Home for all but A
+        {"A": "closed+1", "B": "min+22", "C": "max-84", "D": "quality"},  # Drop Left S1
+        {"A": "closed+1", "B": "min", "C": "max-124", "D": "quality"},  # Drop Left S2
+        {"A": "open", "B": "min", "C": "max-129", "D": "quality"},  # Release
+        {"A": "open", "B": "min+22", "C": "max-84", "D": "quality"},  # Drop Left S3
+        {"A": "open", "B": "min", "C": "max", "D": "home"},  # final home
     ]
 
     result = None
-    # Sequentially move each motor to its target for every step.
     for pose in steps:
-        for motor in ("A", "B", "C", "D"):
-            target = pose.get(motor)
-            if target is None:
-                continue
-            while True:
-                target_deg = target
-                result = arm.move("relative", {motor: target_deg}, speed=speed, units="rotations")
-                # arm.move returns degrees; compare against degree target
-                new_deg = result["new_abs"][motor]
-                if abs(new_deg - target_deg) <= 1e-6:
-                    break
+        result = arm.move("absolute", pose, speed=speed)
     return result
