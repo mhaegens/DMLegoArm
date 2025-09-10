@@ -985,7 +985,11 @@
                 </div>
                 <pre className="bg-slate-100 rounded p-4 text-sm text-slate-800 whitespace-pre-wrap mb-4">{formattedPositions}</pre>
                 <h4 className="font-semibold mb-1">Named points</h4>
-                <pre className="bg-slate-100 rounded p-4 text-sm text-slate-800 whitespace-pre-wrap mb-4">{formattedNamedPoints}</pre>
+                {formattedNamedPoints ? (
+                  <pre className="bg-slate-100 rounded p-4 text-sm text-slate-800 whitespace-pre-wrap mb-4">{formattedNamedPoints}</pre>
+                ) : (
+                  <div className="text-sm text-slate-500 mb-4">No named points.</div>
+                )}
                 <button className="px-3 py-2 rounded-xl bg-brand-600 text-white" onClick={()=>navigator.clipboard.writeText(formattedPositions+'\n'+formattedNamedPoints)}>Copy</button>
               </div>
             </div>
