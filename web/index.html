@@ -44,6 +44,12 @@
     };
     const normalizeDeg = deg => ((deg + 180) % 360 + 360) % 360 - 180;
     const MOTOR_ORDER = ["A","B","C","D","E","F"];
+    const POS_ORDER = {
+      A:["open","closed"],
+      B:["min","pick","max"],
+      C:["min","pick","max"],
+      D:["assembly","neutral","quality"],
+    };
 
     function useLocalStorage(key, initial){
       const [v,setV]=useState(()=>{ try { return JSON.parse(localStorage.getItem(key)) ?? initial; } catch { return initial; } });
@@ -279,8 +285,8 @@
         const d=await api("GET","/v1/arm/calibration",undefined,{log:false}).catch(()=>null);
         if(d) setCalibStatus(d);
       }
-      async function setCalibPoint(name){
-        await api("POST","/v1/arm/calibration",{point:name}).catch(()=>{});
+      async function setCalibPoint(joint,name){
+        await api("POST","/v1/arm/calibration",{joint,name}).catch(()=>{});
         fetchCalibration();
       }
       async function finalizeCalibration(){
@@ -361,6 +367,12 @@
       async function sendPose(name, speed=60){
         if(!name) return;
         await api("POST","/v1/arm/pose", {name, speed}, {queueIfOffline:true});
+      }
+
+      async function gotoNamed(joint, name, speed=60){
+        if(!joint || !name) return;
+        const joints={}; joints[joint]=name;
+        await api("POST","/v1/arm/move",{mode:"absolute",joints,speed},{queueIfOffline:true}).catch(()=>{});
       }
 
       async function sendCoast(motorNames, enable=true){
@@ -719,7 +731,33 @@
               <pre className="bg-slate-100 rounded p-4 text-sm text-slate-800 whitespace-pre-wrap mb-4">{formattedPositions}</pre>
               <h4 className="font-semibold mb-1">Named points</h4>
               {Object.keys(namedPoints || {}).length ? (
-                <pre className="bg-slate-100 rounded p-4 text-sm text-slate-800 whitespace-pre-wrap mb-4">{formattedNamedPoints}</pre>
+                <div className="mb-4 space-y-2">
+                  {motors.map(m=>{
+                    const pts = namedPoints[m.name] || {};
+                    const order = POS_ORDER[m.name] || Object.keys(pts);
+                    return (
+                      <div key={m.name}>
+                        <div className="mb-1 flex items-center gap-2 font-medium">
+                          <span>{m.name}</span>
+                          <span className="text-xs text-slate-500">{m.pos.toFixed(1)}°</span>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {order.filter(p=>pts[p]!==undefined).map(p=>{
+                            const v = pts[p];
+                            const label = p === 'closed' ? 'close' : p;
+                            return (
+                              <div key={p} className="flex items-center gap-1">
+                                <span className="text-xs text-slate-500">{(+v).toFixed(1)}°</span>
+                                <button className="px-2 py-1 rounded bg-white border border-slate-200 hover:bg-slate-50 text-xs" onClick={()=>gotoNamed(m.name,p)}>{label}</button>
+                                <span className="text-xs text-slate-500">{(+v).toFixed(1)}°</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               ) : (
                 <div className="text-sm text-slate-500 mb-4">No named points.</div>
               )}
@@ -1035,7 +1073,15 @@
           )}
 
           {/* Calibration Drawer */}
-          {calibOpen && (
+          {calibOpen && (()=>{
+            const CALIB={
+              A:[{label:'open',key:'open'},{label:'close',key:'closed'}],
+              B:[{label:'min',key:'min'},{label:'pick',key:'pick'},{label:'max',key:'max'}],
+              C:[{label:'min',key:'min'},{label:'pick',key:'pick'},{label:'max',key:'max'}],
+              D:[{label:'assembly',key:'assembly'},{label:'neutral',key:'neutral'},{label:'quality',key:'quality'}],
+            };
+            const allSet=Object.entries(CALIB).every(([j,arr])=>arr.every(p=>calibStatus.points?.[j]?.[p.key]!==undefined));
+            return (
             <div className="fixed inset-0 z-50">
               <div className="absolute inset-0 bg-black/40" onClick={()=>setCalibOpen(false)}></div>
               <aside className="absolute right-0 top-0 h-full w-full max-w-md bg-white shadow-xl p-6 flex flex-col gap-4">
@@ -1043,28 +1089,24 @@
                   <h3 className="text-lg font-semibold text-slate-800">Calibration</h3>
                   <button className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200" onClick={()=>setCalibOpen(false)}>Close</button>
                 </div>
-                <ol className="list-decimal list-inside text-sm space-y-2">
-                  <li className="flex items-center justify-between">
-                    <span>Point 1: A closed, B min, C min, D neutral</span>
-                    <button className="px-2 py-1 rounded bg-brand-600 text-white text-xs disabled:opacity-50" disabled={!!calibStatus.points.p1} onClick={()=>setCalibPoint('p1')}>{calibStatus.points.p1? '✔':'Set'}</button>
-                  </li>
-                  <li className="flex items-center justify-between">
-                    <span>Point 2: A closed, B pick, C min, D assembly</span>
-                    <button className="px-2 py-1 rounded bg-brand-600 text-white text-xs disabled:opacity-50" disabled={!!calibStatus.points.p2} onClick={()=>setCalibPoint('p2')}>{calibStatus.points.p2? '✔':'Set'}</button>
-                  </li>
-                  <li className="flex items-center justify-between">
-                    <span>Point 3: A closed, B min, C min, D quality</span>
-                    <button className="px-2 py-1 rounded bg-brand-600 text-white text-xs disabled:opacity-50" disabled={!!calibStatus.points.p3} onClick={()=>setCalibPoint('p3')}>{calibStatus.points.p3? '✔':'Set'}</button>
-                  </li>
-                  <li className="flex items-center justify-between">
-                    <span>Point 4: A open max, B extended max, C extended max, D neutral</span>
-                    <button className="px-2 py-1 rounded bg-brand-600 text-white text-xs disabled:opacity-50" disabled={!!calibStatus.points.p4} onClick={()=>setCalibPoint('p4')}>{calibStatus.points.p4? '✔':'Set'}</button>
-                  </li>
-                </ol>
-                <button className="mt-2 px-3 py-2 rounded-xl bg-brand-600 text-white disabled:opacity-50" disabled={!['p1','p2','p3','p4'].every(k=>calibStatus.points[k])} onClick={finalizeCalibration}>Finalize</button>
+                <div className="space-y-4 text-sm">
+                  {Object.entries(CALIB).map(([joint,points])=>(
+                    <div key={joint}>
+                      <div className="font-semibold mb-1">Motor {joint}</div>
+                      <div className="flex flex-wrap gap-2">
+                        {points.map(p=>(
+                          <button key={p.key} className="px-2 py-1 rounded bg-brand-600 text-white text-xs disabled:opacity-50" disabled={!!calibStatus.points?.[joint]?.[p.key]} onClick={()=>setCalibPoint(joint,p.key)}>
+                            {calibStatus.points?.[joint]?.[p.key]? `✔ ${p.label}` : p.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <button className="mt-2 px-3 py-2 rounded-xl bg-brand-600 text-white disabled:opacity-50" disabled={!allSet} onClick={finalizeCalibration}>Finalize</button>
               </aside>
-            </div>
-          )}
+            </div>);
+          })()}
 
           {/* Admin Drawer */}
           {adminOpen && (
