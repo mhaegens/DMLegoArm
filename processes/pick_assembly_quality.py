@@ -14,17 +14,17 @@ def run(arm) -> Any:
     # numeric values.  Offsets are expressed relative to those points and are
     # resolved by :meth:`ArmController.resolve_point`.
     steps = [
-        {"A": "open", "B": "min", "C": "max", "D": "home"},  # Start at home
+        {"A": "open", "B": "min", "C": "max", "D": "neutral"},  # Start at home
         {"A": "open", "B": "min+22", "C": "max-84", "D": "assembly"},  # Pick Right S1
         {"A": "open-4", "B": "min", "C": "max-124", "D": "assembly"},  # Pick Right S2
         {"A": "closed+1", "B": "min", "C": "max-129", "D": "assembly"},  # Grab
         {"A": "closed+1", "B": "min+22", "C": "max-84", "D": "assembly"},  # Pick Right S3
-        {"A": "closed+1", "B": "min", "C": "min", "D": "home"},  # Go Home for all but A
+        {"A": "closed+1", "B": "min", "C": "min", "D": "neutral"},  # Go Home for all but A
         {"A": "closed+1", "B": "min+22", "C": "max-84", "D": "quality"},  # Drop Left S1
         {"A": "closed+1", "B": "min", "C": "max-124", "D": "quality"},  # Drop Left S2
         {"A": "open", "B": "min", "C": "max-129", "D": "quality"},  # Release
         {"A": "open", "B": "min+22", "C": "max-84", "D": "quality"},  # Drop Left S3
-        {"A": "open", "B": "min", "C": "max", "D": "home"},  # final home
+        {"A": "open", "B": "min", "C": "max", "D": "neutral"},  # final home
     ]
 
     last_target = None
