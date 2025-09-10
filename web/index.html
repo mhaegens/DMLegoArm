@@ -131,6 +131,7 @@
       const [calibStatus,setCalibStatus]=useState({points:{},calibrated:false});
       const [backlash,setBacklash]=useState({A:0,B:0,C:0,D:0});
       const [lastDir,setLastDir]=useState({A:0,B:0,C:0,D:0});
+      const [namedPoints,setNamedPoints]=useState({});
         const formattedPositions = useMemo(
           () =>
             motors
@@ -141,6 +142,19 @@
               .join('\n'),
           [motors]
         );
+      const formattedNamedPoints = useMemo(
+        () => {
+          const entries = Object.entries(namedPoints || {});
+          if(entries.length===0) return 'No named points';
+          return entries.map(([m,pts])=>{
+            const inner = Object.entries(pts||{})
+              .map(([n,v])=>`  ${n}: ${(+v).toFixed(1)}°`)
+              .join('\n');
+            return `${m}:\n${inner}`;
+          }).join('\n');
+        },
+        [namedPoints]
+      );
 
       // Pill action menu (J/C/B) state
       const [pillMenu,setPillMenu]=useState({open:false, motor:null, x:0, y:0});
@@ -315,6 +329,7 @@
               const cutoff = now() - RING_MS;
               return arr.filter(s => s.t >= cutoff);
             });
+            setNamedPoints(s.points || {});
           } else if(verbose) {
             console.warn("State response missing current positions");
           }
@@ -969,7 +984,13 @@
                   <button className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200" onClick={()=>setPositionsOpen(false)}>Close</button>
                 </div>
                 <pre className="bg-slate-100 rounded p-4 text-sm text-slate-800 whitespace-pre-wrap mb-4">{formattedPositions}</pre>
-                <button className="px-3 py-2 rounded-xl bg-brand-600 text-white" onClick={()=>navigator.clipboard.writeText(formattedPositions)}>Copy</button>
+                <h4 className="font-semibold mb-1">Named points</h4>
+                {formattedNamedPoints ? (
+                  <pre className="bg-slate-100 rounded p-4 text-sm text-slate-800 whitespace-pre-wrap mb-4">{formattedNamedPoints}</pre>
+                ) : (
+                  <div className="text-sm text-slate-500 mb-4">No named points.</div>
+                )}
+                <button className="px-3 py-2 rounded-xl bg-brand-600 text-white" onClick={()=>navigator.clipboard.writeText(formattedPositions+'\n'+formattedNamedPoints)}>Copy</button>
               </div>
             </div>
           )}
