@@ -263,6 +263,10 @@
         setOfflineQueue([]);
       }
 
+      function clearQueue(){
+        setOfflineQueue([]);
+      }
+
       async function saveBacklash(){
         try{
           await api("POST","/v1/arm/backlash",backlash);
@@ -694,10 +698,17 @@
           {/* Status + actions row */}
           <div className="max-w-6xl mx-auto px-4 sm:px-6 mt-6 relative z-10 flex items-center gap-3 flex-wrap">
             <StatusPill />
-            {(offlineQueue.length>0 && connected) ? (
-              <button className="px-3 py-1.5 rounded-lg bg-amber-100 text-amber-900 border border-amber-300" onClick={runQueue}>
-                Execute queued ({offlineQueue.length})
-              </button>
+            {offlineQueue.length>0 ? (
+              <>
+                {connected && (
+                  <button className="px-3 py-1.5 rounded-lg bg-amber-100 text-amber-900 border border-amber-300" onClick={runQueue}>
+                    Execute queued ({offlineQueue.length})
+                  </button>
+                )}
+                <button className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-300" onClick={clearQueue}>
+                  Clear queue
+                </button>
+              </>
             ) : null}
           </div>
 
