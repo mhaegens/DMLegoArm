@@ -11,11 +11,29 @@ from urllib.parse import urlparse
 from typing import Dict, Optional, Literal, Union
 import mimetypes
 import re
+import logging
+from logging.handlers import RotatingFileHandler
 
 # location of bundled web UI
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 
 from processes import PROCESS_MAP
+
+# Configure rotating file logger
+logger = logging.getLogger("lego_arm")
+logger.setLevel(logging.INFO)
+_log_path = "/var/log/legoarm/app.log"
+_formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+try:  # pragma: no cover - filesystem may be read-only
+    os.makedirs(os.path.dirname(_log_path), exist_ok=True)
+    _handler = RotatingFileHandler(_log_path, maxBytes=1_000_000, backupCount=3)
+    _handler.setFormatter(_formatter)
+    logger.addHandler(_handler)
+except Exception as e:  # pragma: no cover - logging setup failure
+    _fallback = logging.StreamHandler()
+    _fallback.setFormatter(_formatter)
+    logger.addHandler(_fallback)
+    logger.error("Failed to initialize file logger: %s", e)
 
 # Optional Bluetooth gamepad support (requires `evdev`)
 try:  # pragma: no cover - optional dependency
@@ -216,6 +234,13 @@ class ArmController:
 
     def move(self, mode: Literal["relative", "absolute"], joints: Dict[str, Union[float, str]], speed: int,
              timeout_s: Optional[float] = None, units: Literal["degrees", "rotations"] = "degrees"):
+        logger.info(
+            "Move command mode=%s speed=%s units=%s joints=%s",
+            mode,
+            speed,
+            units,
+            joints,
+        )
         start = time.time()
         with self.lock:
             if self.stop_event.is_set():
@@ -241,6 +266,9 @@ class ArmController:
                 backlash = self.backlash.get(j, 0.0)
                 if backlash and self._last_dir[j] != 0 and dir_now != self._last_dir[j]:
                     run_delta += backlash * dir_now
+                logger.info(
+                    "Moving joint %s by %.2f degrees at speed %d", j, run_delta, speed
+                )
                 m = self.motors[j]
                 m.run_for_degrees(run_delta, speed=speed, blocking=True)
                 if self.stop_event.is_set():
@@ -252,6 +280,7 @@ class ArmController:
                     raise TimeoutError("Movement timed out")
             self.stop_event.clear()
             self.save_calibration()
+        logger.info("Move complete; new positions: %s", self.current_abs)
         return {"new_abs": self.current_abs.copy()}
 
     # ----- Calibration helpers -----
@@ -352,19 +381,19 @@ arm = ArmController()
 def _gamepad_loop(device_path: Optional[str] = None) -> None:  # pragma: no cover - hardware dependent
     """Read joystick events and translate into motor movements."""
     if InputDevice is None or list_devices is None or ecodes is None:
-        print("evdev not available; gamepad disabled")
+        logger.info("evdev not available; gamepad disabled")
         return
     path = device_path
     if not path:
         devices = list_devices()
         if not devices:
-            print("No gamepad device found")
+            logger.info("No gamepad device found")
             return
         path = devices[0]
     try:
         dev = InputDevice(path)
     except Exception as e:
-        print(f"Failed to open gamepad {path}: {e}")
+        logger.error("Failed to open gamepad %s: %s", path, e)
         return
     axis_map = {
         ecodes.ABS_X: "D",  # base rotation
@@ -432,6 +461,7 @@ def worker():
             op["started_at"] = time.time()
             kind = op["type"]
             req = op["request"]
+            logger.info("Starting operation %s of type %s", op.get("id"), kind)
             if kind == "move":
                 res = arm.move(
                     req.get("mode", "relative"),
@@ -448,13 +478,18 @@ def worker():
                 raise ValueError(f"Unknown op type {kind}")
             op["result"] = res
             op["status"] = "succeeded"
+            logger.info("Operation %s succeeded", op.get("id"))
         except Exception as e:
             op["error"] = {"code": "EXECUTION_ERROR", "message": str(e)}
             op["status"] = "failed"
+            logger.error("Operation %s failed: %s", op.get("id"), e)
         finally:
             op["finished_at"] = time.time()
             with ops_lock:
                 ops[op["id"]] = op
+            logger.info(
+                "Finished operation %s with status %s", op.get("id"), op["status"]
+            )
         op_queue.task_done()
 
 worker_thread = threading.Thread(target=worker, daemon=True)
@@ -538,6 +573,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        logger.info("GET %s from %s", self.path, self.client_address[0])
         parsed = urlparse(self.path)
         path = parsed.path
         if path in {"/", "/index.html", "/ui"}:
@@ -629,6 +665,7 @@ class Handler(BaseHTTPRequestHandler):
             return json_response(self, {"ok": False, "error": {"code": "NOT_FOUND", "message": "Unknown path"}}, 404)
 
     def do_POST(self):
+        logger.info("POST %s from %s", self.path, self.client_address[0])
         parsed = urlparse(self.path)
         path = parsed.path
         if path.startswith("/v1/processes/") or path in ("/v1/arm/move", "/v1/arm/pose", "/v1/arm/pickplace", "/v1/arm/stop", "/v1/arm/coast", "/v1/arm/backlash", "/v1/arm/calibration"):
@@ -777,9 +814,11 @@ class Handler(BaseHTTPRequestHandler):
 
             return json_response(self, {"ok": False, "error": {"code": "NOT_FOUND", "message": "Unknown path"}}, 404)
         except TimeoutError as te:
+            logger.error("Timeout handling POST %s: %s", path, te)
             return json_response(self, {"ok": False, "error": {"code": "TIMEOUT", "message": str(te)}}, 408)
-        except Exception as e:
-            return json_response(self, {"ok": False, "error": {"code": "SERVER_ERROR", "message": str(e)}}, 500)
+        except Exception:
+            logger.exception("Error handling POST %s", path)
+            return json_response(self, {"ok": False, "error": {"code": "SERVER_ERROR", "message": "Internal server error"}}, 500)
 
 # ---------------------------
 # Entrypoint
@@ -788,11 +827,11 @@ class Handler(BaseHTTPRequestHandler):
 def run_server():
     port = int(os.getenv("PORT", "8000"))
     server = HTTPServer(("0.0.0.0", port), Handler)
-    print(f"LEGO Arm REST listening on http://0.0.0.0:{port}")
+    logger.info("LEGO Arm REST listening on http://0.0.0.0:%s", port)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        pass
+        logger.info("Server interrupted, shutting down")
     finally:
         server.server_close()
 
