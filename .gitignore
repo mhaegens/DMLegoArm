@@ -1,3 +1,4 @@
 node_modules/
 __pycache__/
 arm_calibration.json
+lego_arm_master.log
