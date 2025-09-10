@@ -699,16 +699,21 @@
           <div className="max-w-6xl mx-auto px-4 sm:px-6 mt-6 relative z-10 flex items-center gap-3 flex-wrap">
             <StatusPill />
             {offlineQueue.length>0 ? (
-              <>
-                {connected && (
-                  <button className="px-3 py-1.5 rounded-lg bg-amber-100 text-amber-900 border border-amber-300" onClick={runQueue}>
-                    Execute queued ({offlineQueue.length})
-                  </button>
-                )}
-                <button className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-300" onClick={clearQueue}>
-                  Clear queue
-                </button>
-              </>
+              <button
+                className={"relative px-3 py-1.5 pr-8 rounded-lg border " + (connected ?
+                  "bg-amber-100 text-amber-900 border-amber-300" :
+                  "bg-slate-100 text-slate-700 border-slate-300 cursor-default")}
+                onClick={connected ? runQueue : undefined}
+                disabled={!connected}
+              >
+                {connected ? `Execute queued (${offlineQueue.length})` : `Queued (${offlineQueue.length})`}
+                <span
+                  className="absolute top-1/2 right-1 -translate-y-1/2 text-slate-500 hover:text-slate-700"
+                  onClick={(e)=>{ e.stopPropagation(); clearQueue(); }}
+                  role="button"
+                  aria-label="Clear queue"
+                >&times;</span>
+              </button>
             ) : null}
           </div>
 
