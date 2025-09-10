@@ -294,9 +294,9 @@ curl -X POST https://<ngrok>/v1/arm/calibration \\
 | Motor | Names |
 |-------|-------|
 | A (gripper) | `open`, `closed` |
-| B (wrist)   | `min`, `max` |
+| B (wrist)   | `min`, `pick`, `max` |
 | C (elbow)   | `min`, `max` |
-| D (base rotation) | `home`, `assembly`, `quality` |
+| D (base rotation) | `neutral`, `assembly`, `quality` |
 
 These names can be supplied wherever a joint angle is expected, e.g. `{ "A": "open" }`.
 

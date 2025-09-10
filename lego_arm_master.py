@@ -390,9 +390,9 @@ class ArmController:
                 self.calibration_points["home"] = home
                 self.points = {
                     "A": {"closed": p1["A"], "open": p4["A"]},
-                    "B": {"min": p1["B"], "max": p4["B"]},
+                    "B": {"min": p1["B"], "pick": p2["B"], "max": p4["B"]},
                     "C": {"min": p1["C"], "max": p4["C"]},
-                    "D": {"home": p1["D"], "assembly": p2["D"], "quality": p3["D"]},
+                    "D": {"neutral": p1["D"], "assembly": p2["D"], "quality": p3["D"]},
                 }
                 self.calibrated = True
                 self.save_calibration()
@@ -483,12 +483,12 @@ class ArmController:
                             self.current_abs[j] = float(getter())
                         except Exception:
                             pass
-                if self.calibrated and "D" in self.points and "home" in self.points["D"]:
+                if self.calibrated and "D" in self.points and "neutral" in self.points["D"]:
                     home = {
                         "A": self.points["A"].get("open", self.current_abs.get("A", 0.0)),
                         "B": self.points["B"].get("min", self.current_abs.get("B", 0.0)),
                         "C": self.points["C"].get("max", self.current_abs.get("C", 0.0)),
-                        "D": self.points["D"].get("home", self.current_abs.get("D", 0.0)),
+                        "D": self.points["D"].get("neutral", self.current_abs.get("D", 0.0)),
                     }
                 else:
                     home = {"A": 0, "B": 0, "C": 0, "D": 0}
