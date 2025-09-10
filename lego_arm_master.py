@@ -241,13 +241,14 @@ class ArmController:
             units,
             joints,
         )
-        start = time.time()
         with self.lock:
             if self.stop_event.is_set():
                 self.stop_event.clear()
                 raise InterruptedError("Movement interrupted")
             targets: Dict[str, float] = {}
             for j, raw in joints.items():
+                if j not in self.motors:
+                    raise ValueError(f"Unknown joint '{j}'")
                 if isinstance(raw, str):
                     target = self.resolve_point(j, raw)
                 else:
@@ -255,6 +256,11 @@ class ArmController:
                     target = self.current_abs[j] + deg if mode == "relative" else deg
                 targets[j] = self.clamp(j, target)
             plan = {j: tgt - self.current_abs[j] for j, tgt in targets.items()}
+            # compute dynamic timeout per joint if not provided
+            timeout_map: Dict[str, float] = {}
+            for j, delta in plan.items():
+                expected = 0.0556 * (abs(delta) / max(speed, 1))
+                timeout_map[j] = timeout_s if timeout_s is not None else 2.0 + 1.5 * expected
             for j, delta in plan.items():
                 if self.stop_event.is_set():
                     self.stop_event.clear()
@@ -266,19 +272,61 @@ class ArmController:
                 backlash = self.backlash.get(j, 0.0)
                 if backlash and self._last_dir[j] != 0 and dir_now != self._last_dir[j]:
                     run_delta += backlash * dir_now
-                logger.info(
-                    "Moving joint %s by %.2f degrees at speed %d", j, run_delta, speed
-                )
                 m = self.motors[j]
-                m.run_for_degrees(run_delta, speed=speed, blocking=True)
-                if self.stop_event.is_set():
-                    self.stop_event.clear()
-                    raise InterruptedError("Movement interrupted")
-                self.current_abs[j] += delta
+                getter = getattr(m, "get_degrees", None) or getattr(m, "get_position", None)
+                # split long moves into chunks to avoid watchdog limits
+                remaining = run_delta
+                chunks = []
+                max_chunk = 12000.0
+                while abs(remaining) > max_chunk:
+                    chunk = max_chunk if remaining > 0 else -max_chunk
+                    chunks.append(chunk)
+                    remaining -= chunk
+                chunks.append(remaining)
+                start_j = time.time()
+                for idx, chunk in enumerate(chunks, 1):
+                    logger.info(
+                        "Moving joint %s by %.2f degrees at speed %d (%d/%d)",
+                        j,
+                        chunk,
+                        speed,
+                        idx,
+                        len(chunks),
+                    )
+                    m.run_for_degrees(chunk, speed=speed, blocking=True)
+                    if self.stop_event.is_set():
+                        self.stop_event.clear()
+                        raise InterruptedError("Movement interrupted")
+                    if getter:
+                        try:
+                            self.current_abs[j] = float(getter())
+                        except Exception:
+                            self.current_abs[j] += chunk
+                    else:
+                        self.current_abs[j] += chunk
+                    if time.time() - start_j > timeout_map[j]:
+                        try:
+                            m.stop()
+                        except Exception:
+                            pass
+                        if getter:
+                            try:
+                                self.current_abs[j] = float(getter())
+                            except Exception:
+                                pass
+                        self._last_dir[j] = dir_now
+                        self.stop_event.clear()
+                        raise TimeoutError("Movement timed out")
                 self._last_dir[j] = dir_now
-                if timeout_s and time.time() - start > timeout_s:
-                    raise TimeoutError("Movement timed out")
             self.stop_event.clear()
+            # resync all motors from hardware to avoid drift
+            for j, m in self.motors.items():
+                getter = getattr(m, "get_degrees", None) or getattr(m, "get_position", None)
+                if getter:
+                    try:
+                        self.current_abs[j] = float(getter())
+                    except Exception:
+                        pass
             self.save_calibration()
         logger.info("Move complete; new positions: %s", self.current_abs)
         return {"new_abs": self.current_abs.copy()}
@@ -699,7 +747,7 @@ class Handler(BaseHTTPRequestHandler):
                 mode = body.get("mode", "relative")
                 joints = body.get("joints") or {}
                 speed = int(body.get("speed", 60))
-                timeout_s = body.get("timeout_s", 30)
+                timeout_s = body.get("timeout_s")
                 units = body.get("units", "degrees")
                 async_exec = bool(body.get("async_exec", False))
                 if not isinstance(joints, dict) or not joints:
