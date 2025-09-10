@@ -10,7 +10,7 @@ def run(arm) -> Any:
     # Use existing backlash calibration configured on the arm
     # rather than overriding it here.
 
-    # Poses expressed directly in rotations for each motor.
+    # Poses expressed in rotations for each motor.
     steps = [
         {"A": 0.0, "B": 0.0, "C": 0.0, "D": 0.0},  # home
         {"A": 0.0, "B": 22.0, "C": -84.0, "D": 113.0},  # Pick Right S1
@@ -33,9 +33,10 @@ def run(arm) -> Any:
             if target is None:
                 continue
             while True:
-                result = arm.move("absolute", {motor: target}, speed=speed, units="rotations")
-                # arm.move returns degrees; convert to rotations for comparison
-                new_rot = result["new_abs"][motor] / 360.0
-                if abs(new_rot - target) <= 1e-6:
+                target_deg = target * 360.0
+                result = arm.move("absolute", {motor: target_deg}, speed=speed, units="degrees")
+                # arm.move returns degrees; compare against degree target
+                new_deg = result["new_abs"][motor]
+                if abs(new_deg - target_deg) <= 1e-6:
                     break
     return result
