@@ -13,6 +13,9 @@ Environment=API_KEY=<YOUR_API_KEY>
 Environment=USE_FAKE_MOTORS=1
 # For localhost-only dev you may allow no auth:
 # Environment=ALLOW_NO_AUTH_LOCAL=1
+SyslogIdentifier=legoarm
+StandardOutput=journal
+StandardError=journal
 Restart=on-failure
 
 [Install]

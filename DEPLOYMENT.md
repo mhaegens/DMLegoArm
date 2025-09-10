@@ -107,6 +107,24 @@ The instructions assume:
 
 4. **Revert if necessary**
    Restore the previous unit file and repeat the `daemon-reload` and `restart` steps.
+ 
+---
+
+## Persistent logging
+
+To retain logs across reboots on the Raspberry Pi:
+
+1. **Enable persistent storage**
+   ```bash
+   sudo mkdir -p /var/log/journal
+   sudo systemctl restart systemd-journald
+   ```
+   Alternatively, set `Storage=persistent` in `/etc/systemd/journald.conf` and restart `systemd-journald`.
+
+2. **View historical logs**
+   ```bash
+   sudo journalctl -u legoarm --no-pager
+   ```
 
 ---
 
