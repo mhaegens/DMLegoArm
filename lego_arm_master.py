@@ -19,13 +19,13 @@ WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 
 from processes import PROCESS_MAP
 
-# Configure rotating file logger
+# Configure rotating file logger in the same directory as this script so logs
+# stay beside the code regardless of the working directory.
 logger = logging.getLogger("lego_arm")
 logger.setLevel(logging.INFO)
-_log_path = "/var/log/legoarm/app.log"
-_formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+_log_path = os.path.join(os.path.dirname(__file__), "lego_arm_master.log")
+_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s:%(lineno)d %(message)s")
 try:  # pragma: no cover - filesystem may be read-only
-    os.makedirs(os.path.dirname(_log_path), exist_ok=True)
     _handler = RotatingFileHandler(_log_path, maxBytes=1_000_000, backupCount=3)
     _handler.setFormatter(_formatter)
     logger.addHandler(_handler)

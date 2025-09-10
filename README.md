@@ -124,6 +124,8 @@ Set through environment variables (systemd or shell):
 | `ALLOW_NO_AUTH_LOCAL` | No       | `0`     | `1` to skip API key for localhost clients only (dev convenience). |
 | `ARM_BACKLASH_<PORT>` | No       | `0`     | Degrees added on direction change for motor `<PORT>` to take up gear slack (e.g. `ARM_BACKLASH_D=2160` for six rotations). Backlash values and the last motor direction persist in `arm_calibration.json` and can be updated via `POST /v1/arm/backlash`. |
 
+Logs are written to `lego_arm_master.log` beside the script.
+
 ### Backlash calibration UI
 
 Open the control page's **Admin** drawer and double‑click the faint `fw` label at the bottom to reveal a hidden menu. Adjust per‑motor backlash offsets there and press **Save** to update `arm_calibration.json` through `POST /v1/arm/backlash`.
