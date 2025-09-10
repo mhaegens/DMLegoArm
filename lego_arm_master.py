@@ -107,6 +107,10 @@ class ArmController:
             "C": None,
             "D": None,
         }
+        # Calibration points captured from the UI.  ``calibrated`` becomes
+        # True only after all points are recorded and limits/home are derived.
+        self.calibration_points: Dict[str, Dict[str, float]] = {}
+        self.calibrated: bool = False
         self.lock = threading.Lock()
         self.stop_event = threading.Event()
 
@@ -218,6 +222,47 @@ class ArmController:
             self.save_calibration()
         return {"new_abs": self.current_abs.copy()}
 
+    # ----- Calibration helpers -----
+    def record_calibration_point(self, name: str) -> dict:
+        """Store the current absolute positions under ``name``."""
+        with self.lock:
+            self.calibration_points[str(name)] = self.current_abs.copy()
+            return {"points": self.calibration_points.copy()}
+
+    def finalize_calibration(self) -> dict:
+        """Derive joint limits and home pose from recorded points and move."""
+        required = {"p1", "p2", "p3", "p4"}
+        with self.lock:
+            if not required.issubset(self.calibration_points):
+                missing = required - set(self.calibration_points)
+                raise ValueError(f"Missing calibration points: {', '.join(sorted(missing))}")
+            p1 = self.calibration_points["p1"]
+            p2 = self.calibration_points["p2"]
+            p3 = self.calibration_points["p3"]
+            p4 = self.calibration_points["p4"]
+            self.limits = {
+                "A": (min(p1["A"], p4["A"]), max(p1["A"], p4["A"])),
+                "B": (min(p1["B"], p4["B"]), max(p1["B"], p4["B"])),
+                "C": (min(p1["C"], p4["C"]), max(p1["C"], p4["C"])),
+                "D": (
+                    min(p1["D"], p2["D"], p3["D"], p4["D"]),
+                    max(p1["D"], p2["D"], p3["D"], p4["D"]),
+                ),
+            }
+            home = {"A": p4["A"], "B": p1["B"], "C": p4["C"], "D": p1["D"]}
+            self.calibration_points["home"] = home
+            self.calibrated = True
+        # Move to the derived home position outside the lock
+        self.move("absolute", home, speed=40)
+        return {"limits": self.limits.copy(), "home": home}
+
+    def calibration_status(self) -> dict:
+        with self.lock:
+            return {
+                "points": self.calibration_points.copy(),
+                "calibrated": self.calibrated,
+            }
+
     def goto_pose(self, name: str, speed: int):
         poses = {
             "home": {"A": 0, "B": 0, "C": 0, "D": 0},
@@ -255,6 +300,7 @@ class ArmController:
             "limits": self.limits.copy(),
             "motors": list(self.motors.keys()),
             "backlash": self.backlash.copy(),
+            "calibrated": self.calibrated,
         }
 
 arm = ArmController()
@@ -488,6 +534,10 @@ class Handler(BaseHTTPRequestHandler):
             if (resp := auth_ok(self)):
                 return json_response(self, resp[0], resp[1])
             return json_response(self, {"ok": True, "data": {"backlash": arm.backlash.copy(), "last_dir": arm.last_direction()}})
+        if path == "/v1/arm/calibration":
+            if (resp := auth_ok(self)):
+                return json_response(self, resp[0], resp[1])
+            return json_response(self, {"ok": True, "data": arm.calibration_status()})
         if path.startswith("/v1/operations/"):
             if (resp := auth_ok(self)):
                 return json_response(self, resp[0], resp[1])
@@ -540,13 +590,16 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
-        if path.startswith("/v1/processes/") or path in ("/v1/arm/move", "/v1/arm/pose", "/v1/arm/pickplace", "/v1/arm/stop", "/v1/arm/coast", "/v1/arm/backlash"):
+        if path.startswith("/v1/processes/") or path in ("/v1/arm/move", "/v1/arm/pose", "/v1/arm/pickplace", "/v1/arm/stop", "/v1/arm/coast", "/v1/arm/backlash", "/v1/arm/calibration"):
             if (resp := auth_ok(self)):
                 return json_response(self, resp[0], resp[1])
         if path == "/v1/arm/stop":
             arm.stop_all()
             body = parse_json(self)
             return json_response(self, {"ok": True, "data": {"stopped": True, "reason": body.get("reason")}})
+
+        if not arm.calibrated and (path.startswith("/v1/processes/") or path in ("/v1/arm/pose", "/v1/arm/pickplace")):
+            return json_response(self, {"ok": False, "error": {"code": "NOT_CALIBRATED", "message": "Calibration required"}}, 400)
 
         cached = idem_get(self)
         if cached:
@@ -664,6 +717,22 @@ class Handler(BaseHTTPRequestHandler):
                 resp = {"ok": True, "data": res}
                 idem_store(self, resp)
                 return json_response(self, resp)
+
+            if path == "/v1/arm/calibration":
+                if body.get("point"):
+                    res = arm.record_calibration_point(str(body.get("point")))
+                    resp = {"ok": True, "data": res}
+                    idem_store(self, resp)
+                    return json_response(self, resp)
+                if body.get("finalize"):
+                    try:
+                        res = arm.finalize_calibration()
+                        resp = {"ok": True, "data": res}
+                        idem_store(self, resp)
+                        return json_response(self, resp)
+                    except Exception as e:
+                        return json_response(self, {"ok": False, "error": {"code": "CALIB_ERROR", "message": str(e)}}, 400)
+                return json_response(self, {"ok": False, "error": {"code": "BAD_CALIB", "message": "Provide point or finalize"}}, 400)
 
             return json_response(self, {"ok": False, "error": {"code": "NOT_FOUND", "message": "Unknown path"}}, 404)
         except TimeoutError as te:
