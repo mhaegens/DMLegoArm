@@ -290,12 +290,14 @@
         fetchCalibration();
       }
       async function finalizeCalibration(){
-        await api("POST","/v1/arm/calibration",{finalize:true}).catch(()=>{});
-        fetchCalibration();
+        const d=await api("POST","/v1/arm/calibration",{finalize:true}).catch(()=>null);
+        if(d?.limits) setLimits(d.limits);
+        if(d?.points) setCalibStatus({points:d.points, calibrated:true});
       }
       async function resetCalibration(){
-        await api("POST","/v1/arm/calibration",{reset:true}).catch(()=>{});
-        fetchCalibration();
+        const d=await api("POST","/v1/arm/calibration",{reset:true}).catch(()=>null);
+        if(d) setCalibStatus(d);
+        setLimits({A:{min:-9999,max:9999},B:{min:-9999,max:9999},C:{min:-9999,max:9999},D:{min:-9999,max:9999}});
       }
       useEffect(()=>{ if(calibOpen) fetchCalibration(); },[calibOpen]);
 
@@ -1099,7 +1101,14 @@
                       <div className="font-semibold mb-1">Motor {joint}</div>
                       <div className="flex flex-wrap gap-2">
                         {points.map(p=>(
-                          <button key={p.key} className="px-2 py-1 rounded bg-brand-600 text-white text-xs disabled:opacity-50" disabled={!!calibStatus.points?.[joint]?.[p.key]} onClick={()=>setCalibPoint(joint,p.key)}>
+                          <button
+                            key={p.key}
+                            className={
+                              "px-2 py-1 rounded bg-brand-600 text-white text-xs " +
+                              (calibStatus.points?.[joint]?.[p.key] ? "opacity-50" : "")
+                            }
+                            onClick={()=>setCalibPoint(joint,p.key)}
+                          >
                             {calibStatus.points?.[joint]?.[p.key]? `✔ ${p.label}` : p.label}
                           </button>
                         ))}
