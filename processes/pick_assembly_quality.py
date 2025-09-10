@@ -1,6 +1,9 @@
 """Pick from assembly side and place on quality side using named points."""
 
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def run(arm) -> Any:
@@ -24,7 +27,18 @@ def run(arm) -> Any:
         {"A": "open", "B": "min", "C": "max", "D": "home"},  # final home
     ]
 
+    last_target = None
     result = None
-    for pose in steps:
+    for i, pose in enumerate(steps):
+        if last_target:
+            ok, errs = arm.verify_at(last_target)
+            if not ok:
+                logger.warning("DRIFT before step %d: %s", i, errs)
+                arm.move("absolute", last_target, speed=40, timeout_s=60)
+                ok2, errs2 = arm.verify_at(last_target)
+                if not ok2:
+                    logger.error("DRIFT persists before step %d: %s; recovering to home", i, errs2)
+                    arm.recover_to_home(speed=30, timeout_s=90.0)
         result = arm.move("absolute", pose, speed=speed)
+        last_target = arm.resolve_pose(pose)
     return result

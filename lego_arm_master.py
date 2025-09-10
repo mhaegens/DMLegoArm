@@ -142,6 +142,8 @@ class ArmController:
         self.calibrated: bool = False
         self.lock = threading.Lock()
         self.stop_event = threading.Event()
+        self._busy_owner: Optional[int] = None
+        self._busy_count = 0
 
     def clamp(self, joint: str, value: float) -> float:
         limits = self.limits.get(joint)
@@ -157,6 +159,24 @@ class ArmController:
                 m.stop()
             except Exception:
                 pass
+
+    def _acquire_busy(self) -> bool:
+        tid = threading.get_ident()
+        with self.lock:
+            if self._busy_owner not in (None, tid):
+                return False
+            self._busy_owner = tid
+            self._busy_count += 1
+            return True
+
+    def _release_busy(self) -> None:
+        tid = threading.get_ident()
+        with self.lock:
+            if self._busy_owner == tid:
+                self._busy_count -= 1
+                if self._busy_count <= 0:
+                    self._busy_owner = None
+                    self._busy_count = 0
 
     def coast(self, motors: Optional[list[str]] = None, enable: bool = True):
         targets = motors or list(self.motors.keys())
@@ -241,95 +261,100 @@ class ArmController:
             units,
             joints,
         )
-        with self.lock:
-            if self.stop_event.is_set():
-                self.stop_event.clear()
-                raise InterruptedError("Movement interrupted")
-            targets: Dict[str, float] = {}
-            for j, raw in joints.items():
-                if j not in self.motors:
-                    raise ValueError(f"Unknown joint '{j}'")
-                if isinstance(raw, str):
-                    target = self.resolve_point(j, raw)
-                else:
-                    deg = float(raw) * (360.0 if units == "rotations" else 1.0)
-                    target = self.current_abs[j] + deg if mode == "relative" else deg
-                targets[j] = self.clamp(j, target)
-            plan = {j: tgt - self.current_abs[j] for j, tgt in targets.items()}
-            # compute dynamic timeout per joint if not provided
-            timeout_map: Dict[str, float] = {}
-            for j, delta in plan.items():
-                expected = 0.0556 * (abs(delta) / max(speed, 1))
-                timeout_map[j] = timeout_s if timeout_s is not None else 2.0 + 1.5 * expected
-            for j, delta in plan.items():
+        if not self._acquire_busy():
+            raise RuntimeError("BUSY")
+        try:
+            with self.lock:
                 if self.stop_event.is_set():
                     self.stop_event.clear()
                     raise InterruptedError("Movement interrupted")
-                if abs(delta) < 1e-6:
-                    continue
-                dir_now = 1 if delta > 0 else -1
-                run_delta = delta
-                backlash = self.backlash.get(j, 0.0)
-                if backlash and self._last_dir[j] != 0 and dir_now != self._last_dir[j]:
-                    run_delta += backlash * dir_now
-                m = self.motors[j]
-                getter = getattr(m, "get_degrees", None) or getattr(m, "get_position", None)
-                # split long moves into chunks to avoid watchdog limits
-                remaining = run_delta
-                chunks = []
-                max_chunk = 12000.0
-                while abs(remaining) > max_chunk:
-                    chunk = max_chunk if remaining > 0 else -max_chunk
-                    chunks.append(chunk)
-                    remaining -= chunk
-                chunks.append(remaining)
-                start_j = time.time()
-                for idx, chunk in enumerate(chunks, 1):
-                    logger.info(
-                        "Moving joint %s by %.2f degrees at speed %d (%d/%d)",
-                        j,
-                        chunk,
-                        speed,
-                        idx,
-                        len(chunks),
-                    )
-                    m.run_for_degrees(chunk, speed=speed, blocking=True)
+                targets: Dict[str, float] = {}
+                for j, raw in joints.items():
+                    if j not in self.motors:
+                        raise ValueError(f"Unknown joint '{j}'")
+                    if isinstance(raw, str):
+                        target = self.resolve_point(j, raw)
+                    else:
+                        deg = float(raw) * (360.0 if units == "rotations" else 1.0)
+                        target = self.current_abs[j] + deg if mode == "relative" else deg
+                    targets[j] = self.clamp(j, target)
+                plan = {j: tgt - self.current_abs[j] for j, tgt in targets.items()}
+                # compute dynamic timeout per joint if not provided
+                timeout_map: Dict[str, float] = {}
+                for j, delta in plan.items():
+                    expected = 0.0556 * (abs(delta) / max(speed, 1))
+                    timeout_map[j] = timeout_s if timeout_s is not None else 2.0 + 1.5 * expected
+                for j, delta in plan.items():
                     if self.stop_event.is_set():
                         self.stop_event.clear()
                         raise InterruptedError("Movement interrupted")
-                    if getter:
-                        try:
-                            self.current_abs[j] = float(getter())
-                        except Exception:
-                            self.current_abs[j] += chunk
-                    else:
-                        self.current_abs[j] += chunk
-                    if time.time() - start_j > timeout_map[j]:
-                        try:
-                            m.stop()
-                        except Exception:
-                            pass
+                    if abs(delta) < 1e-6:
+                        continue
+                    dir_now = 1 if delta > 0 else -1
+                    run_delta = delta
+                    backlash = self.backlash.get(j, 0.0)
+                    if backlash and self._last_dir[j] != 0 and dir_now != self._last_dir[j]:
+                        run_delta += backlash * dir_now
+                    m = self.motors[j]
+                    getter = getattr(m, "get_degrees", None) or getattr(m, "get_position", None)
+                    # split long moves into chunks to avoid watchdog limits
+                    remaining = run_delta
+                    chunks = []
+                    max_chunk = 12000.0
+                    while abs(remaining) > max_chunk:
+                        chunk = max_chunk if remaining > 0 else -max_chunk
+                        chunks.append(chunk)
+                        remaining -= chunk
+                    chunks.append(remaining)
+                    start_j = time.time()
+                    for idx, chunk in enumerate(chunks, 1):
+                        logger.info(
+                            "Moving joint %s by %.2f degrees at speed %d (%d/%d)",
+                            j,
+                            chunk,
+                            speed,
+                            idx,
+                            len(chunks),
+                        )
+                        m.run_for_degrees(chunk, speed=speed, blocking=True)
+                        if self.stop_event.is_set():
+                            self.stop_event.clear()
+                            raise InterruptedError("Movement interrupted")
                         if getter:
                             try:
                                 self.current_abs[j] = float(getter())
                             except Exception:
+                                self.current_abs[j] += chunk
+                        else:
+                            self.current_abs[j] += chunk
+                        if time.time() - start_j > timeout_map[j]:
+                            try:
+                                m.stop()
+                            except Exception:
                                 pass
-                        self._last_dir[j] = dir_now
-                        self.stop_event.clear()
-                        raise TimeoutError("Movement timed out")
-                self._last_dir[j] = dir_now
-            self.stop_event.clear()
-            # resync all motors from hardware to avoid drift
-            for j, m in self.motors.items():
-                getter = getattr(m, "get_degrees", None) or getattr(m, "get_position", None)
-                if getter:
-                    try:
-                        self.current_abs[j] = float(getter())
-                    except Exception:
-                        pass
-            self.save_calibration()
-        logger.info("Move complete; new positions: %s", self.current_abs)
-        return {"new_abs": self.current_abs.copy()}
+                            if getter:
+                                try:
+                                    self.current_abs[j] = float(getter())
+                                except Exception:
+                                    pass
+                            self._last_dir[j] = dir_now
+                            self.stop_event.clear()
+                            raise TimeoutError("Movement timed out")
+                    self._last_dir[j] = dir_now
+                self.stop_event.clear()
+                # resync all motors from hardware to avoid drift
+                for j, m in self.motors.items():
+                    getter = getattr(m, "get_degrees", None) or getattr(m, "get_position", None)
+                    if getter:
+                        try:
+                            self.current_abs[j] = float(getter())
+                        except Exception:
+                            pass
+                self.save_calibration()
+            logger.info("Move complete; new positions: %s", self.current_abs)
+            return {"new_abs": self.current_abs.copy()}
+        finally:
+            self._release_busy()
 
     # ----- Calibration helpers -----
     def record_calibration_point(self, name: str) -> dict:
@@ -340,37 +365,42 @@ class ArmController:
 
     def finalize_calibration(self) -> dict:
         """Derive joint limits and home pose from recorded points and move."""
-        required = {"p1", "p2", "p3", "p4"}
-        with self.lock:
-            if not required.issubset(self.calibration_points):
-                missing = required - set(self.calibration_points)
-                raise ValueError(f"Missing calibration points: {', '.join(sorted(missing))}")
-            p1 = self.calibration_points["p1"]
-            p2 = self.calibration_points["p2"]
-            p3 = self.calibration_points["p3"]
-            p4 = self.calibration_points["p4"]
-            self.limits = {
-                "A": (min(p1["A"], p4["A"]), max(p1["A"], p4["A"])),
-                "B": (min(p1["B"], p4["B"]), max(p1["B"], p4["B"])),
-                "C": (min(p1["C"], p4["C"]), max(p1["C"], p4["C"])),
-                "D": (
-                    min(p1["D"], p2["D"], p3["D"], p4["D"]),
-                    max(p1["D"], p2["D"], p3["D"], p4["D"]),
-                ),
-            }
-            home = {"A": p4["A"], "B": p1["B"], "C": p4["C"], "D": p1["D"]}
-            self.calibration_points["home"] = home
-            self.points = {
-                "A": {"closed": p1["A"], "open": p4["A"]},
-                "B": {"min": p1["B"], "max": p4["B"]},
-                "C": {"min": p1["C"], "max": p4["C"]},
-                "D": {"home": p1["D"], "assembly": p2["D"], "quality": p3["D"]},
-            }
-            self.calibrated = True
-            self.save_calibration()
-        # Move to the derived home position outside the lock
-        self.move("absolute", home, speed=40)
-        return {"limits": self.limits.copy(), "home": home, "points": self.points.copy()}
+        if not self._acquire_busy():
+            raise RuntimeError("BUSY")
+        try:
+            required = {"p1", "p2", "p3", "p4"}
+            with self.lock:
+                if not required.issubset(self.calibration_points):
+                    missing = required - set(self.calibration_points)
+                    raise ValueError(f"Missing calibration points: {', '.join(sorted(missing))}")
+                p1 = self.calibration_points["p1"]
+                p2 = self.calibration_points["p2"]
+                p3 = self.calibration_points["p3"]
+                p4 = self.calibration_points["p4"]
+                self.limits = {
+                    "A": (min(p1["A"], p4["A"]), max(p1["A"], p4["A"])),
+                    "B": (min(p1["B"], p4["B"]), max(p1["B"], p4["B"])),
+                    "C": (min(p1["C"], p4["C"]), max(p1["C"], p4["C"])),
+                    "D": (
+                        min(p1["D"], p2["D"], p3["D"], p4["D"]),
+                        max(p1["D"], p2["D"], p3["D"], p4["D"]),
+                    ),
+                }
+                home = {"A": p4["A"], "B": p1["B"], "C": p4["C"], "D": p1["D"]}
+                self.calibration_points["home"] = home
+                self.points = {
+                    "A": {"closed": p1["A"], "open": p4["A"]},
+                    "B": {"min": p1["B"], "max": p4["B"]},
+                    "C": {"min": p1["C"], "max": p4["C"]},
+                    "D": {"home": p1["D"], "assembly": p2["D"], "quality": p3["D"]},
+                }
+                self.calibrated = True
+                self.save_calibration()
+            # Move to the derived home position outside the lock
+            self.move("absolute", home, speed=40)
+            return {"limits": self.limits.copy(), "home": home, "points": self.points.copy()}
+        finally:
+            self._release_busy()
 
     def calibration_status(self) -> dict:
         with self.lock:
@@ -390,7 +420,12 @@ class ArmController:
         }
         if name not in poses:
             raise ValueError(f"Unknown pose '{name}'")
-        return self.move("absolute", poses[name], speed=speed)
+        if not self._acquire_busy():
+            raise RuntimeError("BUSY")
+        try:
+            return self.move("absolute", poses[name], speed=speed)
+        finally:
+            self._release_busy()
 
     def pickplace(self, location: str, action: str, speed: int):
         seq_pose = {
@@ -404,12 +439,62 @@ class ArmController:
         steps = seq_pose.get((location, action))
         if not steps:
             raise ValueError("Unsupported pick/place combination")
-        result = None
-        for p in steps:
-            result = self.goto_pose(p, speed)
-        grip = {"pick": -30, "place": 30}[action]
-        result = self.move("relative", {"A": grip}, speed)
-        return result
+        if not self._acquire_busy():
+            raise RuntimeError("BUSY")
+        try:
+            result = None
+            for p in steps:
+                result = self.goto_pose(p, speed)
+            grip = {"pick": -30, "place": 30}[action]
+            result = self.move("relative", {"A": grip}, speed)
+            return result
+        finally:
+            self._release_busy()
+
+    def resolve_pose(self, pose: Dict[str, Union[str, float]]) -> Dict[str, float]:
+        abs_pose: Dict[str, float] = {}
+        for j, v in pose.items():
+            if isinstance(v, str):
+                abs_pose[j] = self.resolve_point(j, v)
+            else:
+                abs_pose[j] = float(v)
+        return abs_pose
+
+    def verify_at(self, target: Dict[str, float], tol_map: Optional[Dict[str, float]] = None) -> tuple[bool, Dict[str, float]]:
+        tol = {"A": 2.0, "B": 3.0, "C": 3.0, "D": 3.0}
+        if tol_map:
+            tol.update(tol_map)
+        errs = {j: abs(self.current_abs.get(j, 0.0) - target.get(j, 0.0)) for j in target}
+        ok = all(errs[j] <= tol[j] for j in target)
+        return ok, errs
+
+    def recover_to_home(self, speed: int = 30, timeout_s: float = 90.0):
+        if not self._acquire_busy():
+            raise RuntimeError("BUSY")
+        try:
+            self.stop_all()
+            time.sleep(0.2)
+            self.coast(enable=False)
+            with self.lock:
+                for j, m in self.motors.items():
+                    getter = getattr(m, "get_degrees", None) or getattr(m, "get_position", None)
+                    if getter:
+                        try:
+                            self.current_abs[j] = float(getter())
+                        except Exception:
+                            pass
+                if self.calibrated and "D" in self.points and "home" in self.points["D"]:
+                    home = {
+                        "A": self.points["A"].get("open", self.current_abs.get("A", 0.0)),
+                        "B": self.points["B"].get("min", self.current_abs.get("B", 0.0)),
+                        "C": self.points["C"].get("max", self.current_abs.get("C", 0.0)),
+                        "D": self.points["D"].get("home", self.current_abs.get("D", 0.0)),
+                    }
+                else:
+                    home = {"A": 0, "B": 0, "C": 0, "D": 0}
+            return self.move("absolute", home, speed=speed, timeout_s=timeout_s)
+        finally:
+            self._release_busy()
 
     def state(self) -> dict:
         return {
@@ -468,10 +553,14 @@ def _gamepad_loop(device_path: Optional[str] = None) -> None:  # pragma: no cove
         joint = axis_map[event.code]
         deg = norm * 5.0  # small step per event
         speed = max(10, int(abs(norm) * 100))
+        if not arm._acquire_busy():
+            continue
         try:
             arm.move("relative", {joint: deg}, speed)
         except Exception:
-            continue
+            pass
+        finally:
+            arm._release_busy()
 
 
 def _start_gamepad_thread() -> threading.Thread | None:
@@ -522,6 +611,10 @@ def worker():
                 res = arm.goto_pose(req["name"], int(req.get("speed", 60)))
             elif kind == "pickplace":
                 res = arm.pickplace(req["location"], req["action"], int(req.get("speed", 60)))
+            elif kind == "process":
+                name = req["name"]
+                proc = PROCESS_MAP[name]
+                res = proc(arm)
             else:
                 raise ValueError(f"Unknown op type {kind}")
             op["result"] = res
@@ -644,6 +737,7 @@ class Handler(BaseHTTPRequestHandler):
                     "POST /v1/arm/coast",
                     "POST /v1/arm/pickplace",
                     "POST /v1/arm/backlash",
+                    "POST /v1/arm/recover",
                     "GET /v1/operations/{id}",
                 ] + process_eps,
                 "poses": ["home", "pick_left", "pick_right", "place_left", "place_right"],
@@ -716,7 +810,7 @@ class Handler(BaseHTTPRequestHandler):
         logger.info("POST %s from %s", self.path, self.client_address[0])
         parsed = urlparse(self.path)
         path = parsed.path
-        if path.startswith("/v1/processes/") or path in ("/v1/arm/move", "/v1/arm/pose", "/v1/arm/pickplace", "/v1/arm/stop", "/v1/arm/coast", "/v1/arm/backlash", "/v1/arm/calibration"):
+        if path.startswith("/v1/processes/") or path in ("/v1/arm/move", "/v1/arm/pose", "/v1/arm/pickplace", "/v1/arm/stop", "/v1/arm/coast", "/v1/arm/backlash", "/v1/arm/calibration", "/v1/arm/recover"):
             if (resp := auth_ok(self)):
                 return json_response(self, resp[0], resp[1])
         if path == "/v1/arm/stop":
@@ -735,11 +829,19 @@ class Handler(BaseHTTPRequestHandler):
             body = parse_json(self)
             if path.startswith("/v1/processes/"):
                 name = path.split("/v1/processes/")[-1]
-                proc = PROCESS_MAP.get(name)
-                if not proc:
+                if name not in PROCESS_MAP:
                     return json_response(self, {"ok": False, "error": {"code": "UNKNOWN_PROCESS", "message": "Unknown process"}}, 404)
-                res = proc(arm)
-                resp = {"ok": True, "data": res}
+                op = {
+                    "id": str(uuid.uuid4()),
+                    "type": "process",
+                    "status": "queued",
+                    "submitted_at": time.time(),
+                    "request": {"name": name},
+                }
+                with ops_lock:
+                    ops[op["id"]] = op
+                op_queue.put(op)
+                resp = {"ok": True, "data": {"operation_id": op["id"], "status": op["status"]}}
                 idem_store(self, resp)
                 return json_response(self, resp)
 
@@ -749,7 +851,7 @@ class Handler(BaseHTTPRequestHandler):
                 speed = int(body.get("speed", 60))
                 timeout_s = body.get("timeout_s")
                 units = body.get("units", "degrees")
-                async_exec = bool(body.get("async_exec", False))
+                async_exec = bool(body.get("async_exec", True))
                 if not isinstance(joints, dict) or not joints:
                     return json_response(self, {"ok": False, "error": {"code": "BAD_MOVE", "message": "Provide joints map"}}, 400)
                 if async_exec:
@@ -774,7 +876,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/v1/arm/pose":
                 name = body.get("name")
                 speed = int(body.get("speed", 60))
-                async_exec = bool(body.get("async_exec", False))
+                async_exec = bool(body.get("async_exec", True))
                 if not name:
                     return json_response(self, {"ok": False, "error": {"code": "BAD_POSE", "message": "Provide pose name"}}, 400)
                 if async_exec:
@@ -810,7 +912,7 @@ class Handler(BaseHTTPRequestHandler):
                 location = body.get("location", "center")
                 action = body.get("action")
                 speed = int(body.get("speed", 60))
-                async_exec = bool(body.get("async_exec", False))
+                async_exec = bool(body.get("async_exec", True))
                 if action not in {"pick", "place"}:
                     return json_response(self, {"ok": False, "error": {"code": "BAD_PICKPLACE", "message": "action must be 'pick' or 'place'"}}, 400)
                 if async_exec:
@@ -860,7 +962,19 @@ class Handler(BaseHTTPRequestHandler):
                         return json_response(self, {"ok": False, "error": {"code": "CALIB_ERROR", "message": str(e)}}, 400)
                 return json_response(self, {"ok": False, "error": {"code": "BAD_CALIB", "message": "Provide point or finalize"}}, 400)
 
+            if path == "/v1/arm/recover":
+                speed = int(body.get("speed", 30))
+                timeout_s = body.get("timeout_s", 90.0)
+                res = arm.recover_to_home(speed=speed, timeout_s=timeout_s)
+                resp = {"ok": True, "data": res}
+                idem_store(self, resp)
+                return json_response(self, resp)
+
             return json_response(self, {"ok": False, "error": {"code": "NOT_FOUND", "message": "Unknown path"}}, 404)
+        except RuntimeError as e:
+            if str(e) == "BUSY":
+                return json_response(self, {"ok": False, "error": {"code": "BUSY", "message": "Arm is executing another command"}}, 423)
+            raise
         except TimeoutError as te:
             logger.error("Timeout handling POST %s: %s", path, te)
             return json_response(self, {"ok": False, "error": {"code": "TIMEOUT", "message": str(te)}}, 408)
