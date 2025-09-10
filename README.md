@@ -58,6 +58,19 @@ Run a quick local check to verify that all four motors respond:
 USE_FAKE_MOTORS=1 python3 motor_selftest.py  # remove USE_FAKE_MOTORS for real hardware
 ```
 
+### Bluetooth gamepad control (optional)
+
+You can steer the arm manually with a standard Bluetooth gamepad. Install the
+`evdev` Python package once and start the server with `ENABLE_GAMEPAD=1`:
+
+```bash
+pip install evdev
+ENABLE_GAMEPAD=1 python3 lego_arm_master.py  # GAMEPAD_DEVICE=/dev/input/eventX to select
+```
+
+Left stick drives rotation (D) and elbow (C); right stick drives wrist (B) and
+gripper (A). The feature quietly disables itself if no controller is found.
+
 ---
 
 ## Software layout
