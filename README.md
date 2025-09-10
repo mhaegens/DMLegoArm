@@ -246,7 +246,7 @@ and any named points captured during calibration.
     "limits": {"A": [-360,360], "B": [-180,180], "C": [-180,180], "D": [-90,90]},
     "motors": ["A","B","C","D"],
     "backlash": {"A":0,"B":0,"C":0,"D":0},
-    "points": {"A": {"closed": 0, "open_max": 90}}
+    "points": {"A": {"closed": 0, "open": 90}}
   }
 }
 ```
@@ -284,6 +284,19 @@ curl -X POST https://<ngrok>/v1/arm/calibration \\
   -H "content-type: application/json" -H "x-api-key: $KEY" \\
   -d '{"point":"p1"}'
 ```
+
+### Calibrated point names
+
+`finalize_calibration` derives the following reference points:
+
+| Motor | Names |
+|-------|-------|
+| A (gripper) | `open`, `closed` |
+| B (wrist)   | `min`, `max` |
+| C (elbow)   | `min`, `max` |
+| D (base rotation) | `home`, `assembly`, `quality` |
+
+These names can be supplied wherever a joint angle is expected, e.g. `{ "A": "open" }`.
 
 ### `POST /v1/arm/pose`  *(auth)*
 
