@@ -1,4 +1,5 @@
-<!-- Robot Arm Control v4.3.1 (fix: define exportDiagnostics + parseQr) -->
+```html
+<!-- Robot Arm Control v4.3.1 (fix: define exportDiagnostics, blendToPose, parseQr) -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -440,4 +441,798 @@
           await nudge(joint, amplitude, sp);
           await new Promise(res=>setTimeout(res, settleMs));
           await refresh();
-          const peak = motors.find(m=>m.name===joi
+          const peak = motors.find(m=>m.name===joint)?.pos ?? before;
+          await nudge(joint, -amplitude, sp);
+          await new Promise(res=>setTimeout(res, settleMs));
+          await refresh();
+          const after = motors.find(m=>m.name===joint)?.pos ?? before;
+          const forwardErr = Math.abs((before+amplitude) - peak);
+          const returnErr  = Math.abs(before - after);
+          results.push({speed:sp, forwardErr, returnErr});
+        }
+        return results;
+      }
+
+      // ---- (NEW) Diagnostics export ----
+      function exportDiagnostics(){
+        const blob = new Blob([JSON.stringify({
+          ts: new Date().toISOString(),
+          baseUrl,
+          inventory,
+          motors,
+          ring,
+          limits,
+          taught,
+          processes,
+          logs: logs.slice(-200),
+        }, null, 2)], {type:"application/json"});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href=url; a.download = 'robot_diagnostics.json';
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      // ---- (NEW) Blend-to-pose helper ----
+      function blendToPose(percent, speed=60){
+        if(!targetAngles) return;
+        const joints={};
+        for(const m of motors){
+          const tgt = targetAngles[m.name];
+          if(typeof tgt !== 'number') continue;
+          const delta = (tgt - m.pos) * (percent/100);
+          if(Math.abs(delta)>=0.5) joints[m.name]=Math.round(delta);
+        }
+        if(Object.keys(joints).length){
+          api("POST","/v1/arm/move",{mode:"relative", joints, speed}).catch(()=>{});
+        }
+      }
+
+      // ---- (NEW) QR parser used by scanner ----
+      function parseQr(text){
+        try {
+          const j = JSON.parse(text);
+          if(j.baseUrl) setBaseUrl(j.baseUrl);
+          if(j.apiKey) setApiKey(j.apiKey);
+          return;
+        } catch {}
+        const params = new URLSearchParams(text);
+        if(params.get('baseUrl')) setBaseUrl(params.get('baseUrl'));
+        if(params.get('apiKey')) setApiKey(params.get('apiKey'));
+      }
+
+      // Polling intervals & tab visibility
+      useEffect(()=>{ checkHealth(); const id=setInterval(checkHealth,15000); return ()=>clearInterval(id); }, [baseUrl, apiKey]);
+      useEffect(()=>{
+        updatePositions();
+        const id=setInterval(()=>{ if(!document.hidden) updatePositions(); }, 5000);
+        const onVis = () => { if(!document.hidden) updatePositions(); };
+        document.addEventListener("visibilitychange", onVis);
+        return ()=>{ clearInterval(id); document.removeEventListener("visibilitychange", onVis); };
+      }, [baseUrl, apiKey]);
+      useEffect(()=>{ refreshProcesses(); }, [baseUrl, apiKey]);
+
+      // ---------- Analytics ----------
+      const series = useMemo(()=>{
+        const names = Object.keys(motors.reduce((acc,m)=> (acc[m.name]=1, acc), {}));
+        const byName = Object.fromEntries(names.map(n=>[n, []]));
+        ring.forEach(s=>{ names.forEach(n=> byName[n].push({t:s.t, v: s.angles[n] ?? 0})) });
+        return byName;
+      }, [ring, motors]);
+
+      const rates = useMemo(()=>{
+        const r={};
+        for(const [n,arr] of Object.entries(series)){
+          if(arr.length<2){ r[n]=0; continue; }
+          const a=arr[arr.length-2], b=arr[arr.length-1];
+          const dt=(b.t-a.t)/1000; const dv=b.v-a.v; r[n]= dt? (dv/dt) : 0;
+        }
+        return r;
+      }, [series]);
+
+      const latencies = useMemo(()=> logs.filter(l=>typeof l.ms==='number').map(l=>l.ms), [logs]);
+      const reliab = useMemo(()=>{
+        const ok = logs.filter(l=>l.level==='ok').length;
+        const err = logs.filter(l=>l.level==='err').length;
+        const total = ok+err || 1;
+        return { successRate: (ok/total)*100, p50: percentile(latencies, 50), p95: percentile(latencies, 95) };
+      }, [logs, latencies]);
+
+      const bins = useMemo(()=>{
+        const B=18;
+        const out={};
+        for(const n of Object.keys(series)){
+          const arr=new Array(B).fill(0);
+          const values = series[n].map(x=>x.v);
+          if(values.length){
+            const min=Math.min(...values), max=Math.max(...values);
+            for(const v of values){
+              const idx = clamp(Math.floor(((v-min)/(max-min||1)) * (B-1)), 0, B-1);
+              arr[idx]++;
+            }
+          }
+          out[n]=arr;
+        }
+        return out;
+      }, [series]);
+
+      const targetAngles = useMemo(()=>{
+        if(targetPose && taught[targetPose]) return taught[targetPose];
+        return null;
+      }, [targetPose, taught]);
+
+      // ---------- Hold-to-repeat helpers ----------
+      function holdNudgeStart(name, delta){
+        if(repeatRef.current) return;
+        nudge(name, delta);
+        repeatRef.current = setInterval(()=> nudge(name, delta), 220);
+      }
+      function stopHoldRepeat(){
+        if(repeatRef.current){ clearInterval(repeatRef.current); repeatRef.current=null; }
+      }
+
+      // ---------- Tilt permission + handler ----------
+      async function enableTilt(){
+        try{
+          const Any = window.DeviceOrientationEvent;
+          if(Any && typeof Any.requestPermission === 'function'){
+            const res = await Any.requestPermission();
+            if(res !== 'granted'){ alert('Motion permission not granted'); setTiltReady(false); return; }
+          }
+          setTiltReady(true);
+          setTiltEnabled(true);
+        }catch(e){
+          setTiltReady(true);
+          setTiltEnabled(true);
+        }
+      }
+      useEffect(()=>{
+        if(!tiltEnabled) return;
+        function onOrient(e){
+          const b = (typeof e.beta === 'number') ? e.beta : 0; // -180..180
+          setTiltBeta(b);
+          if(!jogMotor || !jogEnable || !tiltReady) return;
+          const deflection = b - tiltZeroRef.current;
+          const scaled = clamp(deflection * tiltGain, -3, 3);
+          const threshold = 0.45;
+          const t = now();
+          if(Math.abs(scaled) > threshold && (t - lastTiltTimeRef.current) > 160){
+            lastTiltTimeRef.current = t;
+            const step = scaled > 0 ? 1 : -1; // 1° nudge per tick
+            nudge(jogMotor.name, step);
+          }
+        }
+        window.addEventListener('deviceorientation', onOrient);
+        return ()=> window.removeEventListener('deviceorientation', onOrient);
+      }, [tiltEnabled, tiltReady, jogMotor, jogEnable, tiltGain, motors]);
+
+      // ---------- Header subcomponents ----------
+      const StatusPill = () => (
+        <div className={cx(
+          "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white text-slate-800 shadow-sm ring-1",
+          connected ? 'ring-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' : 'ring-slate-200'
+        )}>
+          <span className={cx("w-2.5 h-2.5 rounded-full", connected ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]' : 'bg-slate-300')}></span>
+          <span className="font-semibold">{connected ? "Connected" : "Offline"}</span>
+        </div>
+      );
+
+      // Keyboard emergency stop
+      useEffect(()=>{
+        function onKey(e){ if(e.key === 'Escape'){ handleStop(); } }
+        window.addEventListener('keydown', onKey);
+        return ()=>window.removeEventListener('keydown', onKey);
+      }, []);
+
+      // ----- Render -----
+      return (
+        <div className="min-h-screen relative">
+          {/* Header */}
+          <header className="relative bg-gradient-to-b from-brand-600 to-brand-700 text-white soft-shadow overflow-visible">
+            <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-4">
+              <div className="flex items-center justify-between gap-2">
+                <h1 className="text-2xl font-semibold tracking-tight drop-shadow-sm">Lego Arm Control</h1>
+                <div className="flex items-center gap-2">
+                  <Btn variant="ghost" size="md" aria-label="Scan QR" title="Scan QR for config" onClick={()=>setQrOpen(true)}>
+                    <Icon name="qr" />
+                  </Btn>
+                  <Btn variant="ghost" size="md" onClick={()=>setCalibOpen(true)} aria-label="Open calibration">
+                    <Icon name="tune" /><span className="ml-2">Calibrate</span>
+                  </Btn>
+                  <Btn variant="ghost" size="md" onClick={()=>setAdminOpen(true)} aria-label="Open admin settings">
+                    <Icon name="menu" /><span className="ml-2">Admin</span>
+                  </Btn>
+                </div>
+              </div>
+            </div>
+
+            {/* Hero & stacked motor pills */}
+            <div className="relative max-w-6xl mx-auto px-4 sm:px-6 h-[18rem] sm:h-[22rem]">
+              <img src="robot-arm.png" alt="Robot Arm" className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-[20%] pointer-events-none select-none max-h-[20rem] sm:max-h-[24rem] drop-shadow-[0_16px_36px_rgba(31,144,255,0.55)]" />
+              <div className="absolute right-4 sm:right-6 top-1/2 -translate-y-1/2 flex flex-col gap-2 items-end">
+                {motors.map(m => (
+                  <MotorPill
+                    key={m.id}
+                    onClick={(e)=>{
+                      const r = e.currentTarget.getBoundingClientRect();
+                      setPillMenu({open:true, motor:m, x:r.left, y:r.bottom + 6});
+                    }}
+                  >
+                    <span className="font-semibold">{m.name}</span>
+                    <span className="opacity-90 ml-0.5">
+                      {nudgeUnit==='deg'
+                        ? Math.round(m.pos)+'°'
+                        : (m.pos/360).toLocaleString('de-DE',{minimumFractionDigits:1,maximumFractionDigits:2})+'r'}
+                    </span>
+                  </MotorPill>
+                ))}
+              </div>
+            </div>
+          </header>
+
+          {/* Pill action popover (J / C / B) */}
+          {pillMenu.open && pillMenu.motor && (
+            <div
+              ref={pillMenuRef}
+              className="fixed z-50 bg-white rounded-xl shadow-xl border border-slate-200 p-2 flex items-center gap-2"
+              style={{left: pillMenu.x + 'px', top: pillMenu.y + 'px'}}
+            >
+              <Btn size="sm" variant="dark" onClick={()=>{ setJogMotor(pillMenu.motor); setPillMenu({open:false, motor:null, x:0, y:0}); }} title="Jog">J</Btn>
+              <Btn size="sm" variant="secondary" onClick={()=>{ sendCoast(pillMenu.motor.name, true); setPillMenu({open:false, motor:null, x:0, y:0}); }} title="Coast">C</Btn>
+              <Btn size="sm" variant="secondary" onClick={()=>{ sendCoast(pillMenu.motor.name, false); setPillMenu({open:false, motor:null, x:0, y:0}); }} title="Brake">B</Btn>
+            </div>
+          )}
+
+          {/* Status + queue */}
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 mt-6 relative z-10 flex items-center gap-3 flex-wrap">
+            <StatusPill />
+            {offlineQueue.length>0 ? (
+              <div className="flex items-center gap-2">
+                <Btn
+                  variant={connected ? "secondary" : "outline"}
+                  size="md"
+                  onClick={connected ? runQueue : undefined}
+                  disabled={!connected}
+                  className={cx(!connected && "cursor-default")}
+                >
+                  {connected ? `Execute queued (${offlineQueue.length})` : `Queued (${offlineQueue.length})`}
+                </Btn>
+                <Btn variant="outline" size="md" onClick={clearQueue}>Clear</Btn>
+              </div>
+            ) : null}
+          </div>
+
+          {/* Main */}
+          <main className="max-w-6xl mx-auto px-4 sm:px-6 pt-12 sm:pt-16 pb-28 space-y-6">
+            <Panel title="General" subtitle="Quick actions">
+              <div className="grid sm:grid-cols-6 gap-3">
+                <Btn onClick={()=>sendPose("home")}>Home</Btn>
+                <Btn variant="secondary" onClick={handleStop}>Stop</Btn>
+                <Btn variant="secondary" onClick={()=>sendCoast(null,true)}>Coast all</Btn>
+                <Btn variant="secondary" onClick={()=>checkHealth(true)}>Health</Btn>
+                <Btn variant="secondary" onClick={()=>loadInventory(true)}>Inventory</Btn>
+              </div>
+            </Panel>
+
+            <Panel title="Positions" actions={<Btn variant="outline" onClick={()=>refresh(true)}>Refresh</Btn>}>
+              <pre className="bg-slate-100 rounded p-4 text-sm text-slate-800 whitespace-pre-wrap mb-4">{formattedPositions}</pre>
+              <h4 className="font-semibold mb-1">Named points</h4>
+              {Object.keys(namedPoints || {}).length ? (
+                <div className="mb-4 space-y-2">
+                  {motors.map(m=>{
+                    const pts = namedPoints[m.name] || {};
+                    const order = POS_ORDER[m.name] || Object.keys(pts);
+                    return (
+                      <div key={m.name}>
+                        <div className="mb-1 flex items-center gap-2 font-medium">
+                          <span>{m.name}</span>
+                          <span className="text-xs text-slate-500">{m.pos.toFixed(1)}°</span>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {order.filter(p=>pts[p]!==undefined).map(p=>{
+                            const v = pts[p];
+                            const label = p === 'closed' ? 'close' : p;
+                            return (
+                              <div key={p} className="flex items-center gap-1">
+                                <span className="text-xs text-slate-500">{(+v).toFixed(1)}°</span>
+                                <Btn variant="secondary" size="sm" onClick={()=>gotoNamed(m.name,p)}>{label}</Btn>
+                                <span className="text-xs text-slate-500">{(+v).toFixed(1)}°</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-sm text-slate-500 mb-4">No named points.</div>
+              )}
+              <Btn onClick={()=>navigator.clipboard.writeText(formattedPositions+'\n'+formattedNamedPoints)}>
+                <Icon name="copy"/><span className="ml-2">Copy</span>
+              </Btn>
+            </Panel>
+
+            <Panel
+              title="Telemetry & Targets"
+              actions={
+                <>
+                  <select className="px-2 py-1 rounded-lg border border-slate-200" value={targetPose || ''} onChange={e=>setTargetPose(e.target.value || null)}>
+                    <option value="">No target</option>
+                    {Object.keys(taught).map(k=><option key={k} value={k}>{k}</option>)}
+                  </select>
+                  <Btn variant="outline" onClick={()=>{
+                    const name = prompt("Save current as pose name:");
+                    if(!name) return;
+                    const angles = Object.fromEntries(motors.map(m=>[m.name, m.pos]));
+                    setTaught({...taught, [name]: angles});
+                    setTargetPose(name);
+                  }}>
+                    <Icon name="target"/><span className="ml-2">Save current as pose</span>
+                  </Btn>
+                </>
+              }
+            >
+              <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+                {motors.map(m=>{
+                  const data = (series[m.name]||[]).map(s=>s.v).slice(-60);
+                  const delta = targetAngles && typeof targetAngles[m.name]==='number' ? (targetAngles[m.name]-m.pos) : 0;
+                  const dtheta = rates[m.name] || 0;
+                  const arr = bins[m.name] || [0];
+                  const maxv = Math.max(1, ...arr);
+                  return (
+                    <div key={m.name} className="border rounded-2xl p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="font-semibold">{m.name}</div>
+                        <div className="text-sm text-slate-500">
+                          {nudgeUnit==='deg'
+                            ? Math.round(m.pos)+'°'
+                            : (m.pos/360).toLocaleString('de-DE',{minimumFractionDigits:1,maximumFractionDigits:2})+'r'}
+                        </div>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between">
+                        <div className="text-xs text-slate-600">dθ/dt: {dtheta.toFixed(2)}°/s</div>
+                        <div className="text-xs text-slate-500">last {data.length}</div>
+                      </div>
+                      <div className="mt-1 text-slate-500"><Sparkline data={data}/></div>
+                      {targetAngles && <div className="mt-3 flex items-center justify-center"><DeltaGauge delta={delta}/></div>}
+                      <div className="mt-3">
+                        <div className="flex gap-0.5">{arr.map((v,i)=>{
+                          const alpha = v ? Math.min(1, 0.15 + v / maxv) : 0.08;
+                          return <div key={i} className="h-2 w-3 rounded" style={{background:`rgba(31,144,255,${alpha})`}}></div>;
+                        })}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {targetAngles && (
+                <div className="mt-4 flex items-center gap-3">
+                  <label className="text-sm text-slate-700">Blend to target</label>
+                  <input type="range" min="0" max="100" defaultValue="0" onChange={e=>blendToPose(+e.target.value)}/>
+                </div>
+              )}
+            </Panel>
+
+            <Panel
+              title="Nudge controls"
+              actions={
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-600">Units</span>
+                  <select className="px-3 py-2 rounded-xl bg-white border border-slate-200" value={nudgeUnit} onChange={e=>setNudgeUnit(e.target.value)}>
+                    <option value="deg">Degrees</option>
+                    <option value="rot">Rotations</option>
+                  </select>
+                  <span className="text-xs text-slate-600">Step</span>
+                  {nudgeUnit==='deg' ? (
+                    <select className="px-3 py-2 rounded-xl bg-white border border-slate-200" value={stepDeg}
+                            onChange={e=>setStepDeg(parseFloat(e.target.value)||1)}>
+                      <option value="1">1°</option>
+                      <option value="2">2°</option>
+                      <option value="5">5°</option>
+                      <option value="10">10°</option>
+                    </select>
+                  ) : (
+                    <input type="text" className="px-3 py-2 rounded-xl bg-white border border-slate-200 w-24" value={stepRotStr}
+                           onChange={e=>setStepRotRaw(e.target.value)} />
+                  )}
+                </div>
+              }
+            >
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {motors.map(m => (
+                  <div key={m.id} className="border rounded-2xl p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="font-semibold">{m.name}</div>
+                      <div className="text-sm text-slate-500">
+                        {nudgeUnit==='deg'
+                          ? Math.round(m.pos)+'°'
+                          : (m.pos/360).toLocaleString('de-DE',{minimumFractionDigits:1,maximumFractionDigits:2})+'r'}
+                      </div>
+                    </div>
+                    <div className="mt-3 flex gap-2">
+                      <Btn variant="secondary" className="w-full"
+                           onClick={()=>nudge(m.name,-step*(nudgeUnit==='deg'?1:360))}>
+                        -{nudgeUnit==='deg'?stepDeg:stepRotStr}{nudgeUnit==='deg'?'°':'r'}
+                      </Btn>
+                      <Btn className="w-full"
+                           onClick={()=>nudge(m.name,step*(nudgeUnit==='deg'?1:360))}>
+                        +{nudgeUnit==='deg'?stepDeg:stepRotStr}{nudgeUnit==='deg'?'°':'r'}
+                      </Btn>
+                      <Btn variant="dark" className="w-14" title="Jog with tilt" onClick={()=>setJogMotor(m)}>J</Btn>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+
+            <Panel title="Production processes" actions={<Btn variant="outline" onClick={refreshProcesses}>Refresh</Btn>}>
+              {processes.length===0 ? (
+                <div className="text-sm text-slate-600">No processes available.</div>
+              ) : (
+                <div className="grid md:grid-cols-2 gap-3">
+                  {processes.map(name => (
+                    <div key={name} className="border rounded-2xl p-3 flex items-center justify-between">
+                      <div className="font-semibold">{name}</div>
+                      <Btn onClick={()=>runProcess(name)}><Icon name="play"/><span className="ml-2">Run</span></Btn>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Panel>
+
+            <Panel title="Analytics" subtitle="Reliability & tuning">
+              <div className="grid md:grid-cols-3 gap-4">
+                <div className="border rounded-2xl p-3">
+                  <div className="text-sm font-semibold">Reliability (session)</div>
+                  <div className="mt-2 text-sm text-slate-700">Success: {reliab.successRate.toFixed(1)}%</div>
+                  <div className="text-sm text-slate-700">P50 latency: {fmtMs(reliab.p50)}</div>
+                  <div className="text-sm text-slate-700">P95 latency: {fmtMs(reliab.p95)}</div>
+                </div>
+                <div className="md:col-span-2 border rounded-2xl p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-semibold">Speed vs Accuracy tuner</div>
+                    <Btn variant="outline" onClick={async()=>{
+                      const res = await runTuner({joint: motors[0]?.name || "A"});
+                      alert("Tuner results: "+JSON.stringify(res));
+                    }}>Run sweep</Btn>
+                  </div>
+                  <div className="text-xs text-slate-600 mt-1">Runs tiny ±5° test on first joint, measures forward/return error per speed.</div>
+                </div>
+              </div>
+              <div className="mt-3">
+                <Btn variant="outline" onClick={exportDiagnostics}><Icon name="dl"/><span className="ml-2">Export diagnostics</span></Btn>
+              </div>
+            </Panel>
+
+            <Panel title="Custom request">
+              <div className="grid sm:grid-cols-5 gap-3">
+                <div>
+                  <label className="block text-xs text-slate-600 mb-1">Method</label>
+                  <select className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200" value={customMethod} onChange={e=>setCustomMethod(e.target.value)}>
+                    <option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option>
+                  </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs text-slate-600 mb-1">Path</label>
+                  <input className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200" value={customPath} onChange={e=>setCustomPath(e.target.value)} />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs text-slate-600 mb-1">JSON body</label>
+                  <textarea className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 h-[42px]" value={customBody} onChange={e=>setCustomBody(e.target.value)}></textarea>
+                </div>
+              </div>
+              <div className="mt-3 flex gap-2">
+                <Btn onClick={async()=>{
+                  let body; try{ body = customBody ? JSON.parse(customBody) : undefined; } catch { alert("Invalid JSON body"); return; }
+                  await api(customMethod, customPath, body, {queueIfOffline:true});
+                }}>Send</Btn>
+              </div>
+            </Panel>
+          </main>
+
+          {/* Floating vertical buttons: Console (top) + Master Stop (bottom) */}
+          <div className="fixed bottom-5 right-5 z-50 flex flex-col items-center gap-3">
+            <Btn variant="dark" size="icon" aria-label="Open Console" title="Open Console" onClick={()=>setConsoleOpen(true)}>
+              <Icon name="console" className="w-7 h-7" />
+            </Btn>
+            <Btn variant="danger" size="icon" aria-label="Master Stop" title="Master Stop (Esc)" onClick={handleStop}>
+              <Icon name="stop" className="w-7 h-7" />
+            </Btn>
+          </div>
+
+          <footer className="py-6 text-center text-xs text-slate-500">
+            Built with React + Tailwind. Settings are saved locally.
+            <div className="mt-1 text-slate-600">— <span className="font-semibold">Michiel Haegens</span> • SAP DM = <span className="font-semibold">Definitely Moving</span>.</div>
+          </footer>
+
+          {/* Inventory modal */}
+          {inventoryOpen && (
+            <div className="fixed inset-0 z-40 flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="inv-title">
+              <div className="absolute inset-0 bg-black/40" onClick={()=>setInventoryOpen(false)}></div>
+              <div className="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-md max-h-[80vh] overflow-auto">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 id="inv-title" className="text-lg font-semibold text-slate-800">Inventory</h3>
+                  <Btn variant="secondary" size="sm" onClick={()=>setInventoryOpen(false)}>Close</Btn>
+                </div>
+                {inventory ? (
+                  <div className="text-sm text-slate-700 space-y-4">
+                    {inventory.endpoints && (
+                      <div>
+                        <h4 className="font-semibold mb-1">Endpoints</h4>
+                        <ul className="list-disc list-inside space-y-1">{inventory.endpoints.map((e,i)=>(<li key={i}>{e}</li>))}</ul>
+                      </div>
+                    )}
+                    {inventory.poses && (
+                      <div>
+                        <h4 className="font-semibold mb-1">Poses</h4>
+                        <ul className="list-disc list-inside space-y-1">{inventory.poses.map((p,i)=>(<li key={i}>{p}</li>))}</ul>
+                      </div>
+                    )}
+                    {inventory.motors && (
+                      <div>
+                        <h4 className="font-semibold mb-1">Motors</h4>
+                        <ul className="list-disc list-inside space-y-1">{inventory.motors.map((m,i)=>(<li key={i}>{m}</li>))}</ul>
+                      </div>
+                    )}
+                  </div>
+                ) : ( <div className="text-sm text-slate-500">No inventory data.</div> )}
+              </div>
+            </div>
+          )}
+
+          {/* Console modal */}
+          {consoleOpen && (
+            <div className="fixed inset-0 z-50">
+              <div className="absolute inset-0 bg-black/40" onClick={()=>setConsoleOpen(false)}></div>
+              <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-xl p-6 w-full max-w-3xl max-h-[85vh] overflow-auto">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2"><Icon name="console"/><h3 className="text-lg font-semibold">Console & Timeline</h3></div>
+                  <div className="flex gap-2">
+                    <Btn variant="outline" size="sm" onClick={()=>navigator.clipboard.writeText(JSON.stringify(logs,null,2))}><Icon name="copy"/><span className="ml-1 text-sm">Copy</span></Btn>
+                    <Btn variant="outline" size="sm" onClick={()=>setLogs([])}><Icon name="trash"/><span className="ml-1 text-sm">Clear</span></Btn>
+                    <Btn variant="secondary" size="sm" onClick={()=>setConsoleOpen(false)}>Close</Btn>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <div className="min-w-[520px]">
+                    {logs.slice(-100).map((l,idx)=> (
+                      <div key={idx} className="flex items-center gap-3 py-1 text-sm">
+                        <div className={cx("w-2 h-2 rounded-full",
+                          l.level==='err'?'bg-red-500': l.level==='ok'?'bg-emerald-500':'bg-sky-400')}></div>
+                        <div className="text-slate-500 w-24 shrink-0">{l.ts}</div>
+                        <div className="shrink-0 w-20 text-slate-500">{typeof l.ms==='number'? fmtMs(l.ms) : ''}</div>
+                        <div className="text-slate-800">{l.text}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="console-area mt-3 bg-slate-950 text-slate-100 rounded-xl p-3 h-64 overflow-auto ring-1 ring-black/10">
+                  {logs.length === 0 ? (<div className="text-slate-400">No logs yet. Actions will appear here.</div>) : (
+                    logs.map((l, idx) => (
+                      <div key={idx} className="whitespace-pre-wrap text-sm">
+                        <span className="text-brand-300">{l.ts}</span>{" "}
+                        <span className={{"req":"text-sky-300","ok":"text-emerald-300","err":"text-red-300"}[l.level] || ""}>{l.text}</span>
+                        {l.body !== undefined ? (<pre className="text-xs text-slate-300 mt-1 mb-2 bg-slate-900/60 rounded p-2">
+                          {typeof l.body === "string" ? l.body.slice(0,5000) : JSON.stringify(l.body, null, 2).slice(0,5000)}
+                        </pre>) : null}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* QR Bootstrap */}
+          {qrOpen && (
+            <div className="fixed inset-0 z-50">
+              <div className="absolute inset-0 bg-black/40" onClick={()=>setQrOpen(false)}></div>
+              <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2"><Icon name="qr"/><h3 className="text-lg font-semibold">Scan QR</h3></div>
+                  <Btn variant="secondary" size="sm" onClick={()=>setQrOpen(false)}>Close</Btn>
+                </div>
+                <video id="qr-video" className="w-full rounded border"></video>
+                <div className="mt-3">
+                  <Btn onClick={async()=>{
+                    if(!window.QrScanner){ alert("QR library not loaded."); return; }
+                    const video=document.getElementById('qr-video');
+                    const scanner=new window.QrScanner(video, result=>{ parseQr(result?.data || result); scanner.stop(); setQrOpen(false); }, {highlightScanRegion:true});
+                    await scanner.start();
+                  }}>Start camera</Btn>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Calibration Drawer */}
+          {calibOpen && (()=>{
+            const CALIB={
+              A:[{label:'open',key:'open'},{label:'close',key:'closed'}],
+              B:[{label:'min',key:'min'},{label:'pick',key:'pick'},{label:'max',key:'max'}],
+              C:[{label:'min',key:'min'},{label:'pick',key:'pick'},{label:'max',key:'max'}],
+              D:[{label:'assembly',key:'assembly'},{label:'neutral',key:'neutral'},{label:'quality',key:'quality'}],
+            };
+            const allSet=Object.entries(CALIB).every(([j,arr])=>arr.every(p=>calibStatus.points?.[j]?.[p.key]!==undefined));
+            return (
+            <div className="fixed inset-0 z-50 pointer-events-none">
+              <div className="absolute inset-0 bg-black/40"></div>
+              <aside className="absolute right-0 top-0 h-full w-full max-w-md bg-white shadow-xl p-6 flex flex-col gap-4 pointer-events-auto">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-lg font-semibold text-slate-800">Calibration</h3>
+                  <Btn variant="secondary" size="sm" onClick={()=>setCalibOpen(false)}>Close</Btn>
+                </div>
+                <div className="space-y-4 text-sm">
+                  {Object.entries(CALIB).map(([joint,points])=>(
+                    <div key={joint}>
+                      <div className="font-semibold mb-1">Motor {joint}</div>
+                      <div className="flex flex-wrap gap-2">
+                        {points.map(p=>(
+                          <Btn
+                            key={p.key}
+                            size="sm"
+                            className={cx(calibStatus.points?.[joint]?.[p.key] && "opacity-50")}
+                            onClick={()=>setCalibPoint(joint,p.key)}
+                          >
+                            {calibStatus.points?.[joint]?.[p.key]? `✔ ${p.label}` : p.label}
+                          </Btn>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <Btn variant="secondary" onClick={resetCalibration}>Reset</Btn>
+                  <Btn disabled={!allSet} onClick={finalizeCalibration}>Finalize</Btn>
+                </div>
+              </aside>
+            </div>);
+          })()}
+
+          {/* Admin Drawer */}
+          {adminOpen && (
+            <div className="fixed inset-0 z-50">
+              <div className="absolute inset-0 bg-black/40" onClick={()=>setAdminOpen(false)}></div>
+              <aside className="absolute right-0 top-0 h-full w-full max-w-md bg-white shadow-xl p-6 flex flex-col gap-2">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-lg font-semibold text-slate-800">Admin</h3>
+                  <Btn variant="secondary" size="sm" onClick={()=>setAdminOpen(false)}>Close</Btn>
+                </div>
+                <label className="block text-xs text-slate-600">Base URL</label>
+                <input className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200" placeholder="https://your-ngrok-url.example" value={baseUrl} onChange={e=>setBaseUrl(e.target.value)} />
+                <label className="block text-xs text-slate-600 mt-2">API key (optional)</label>
+                <input className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200" placeholder="api key..." value={apiKey} onChange={e=>setApiKey(e.target.value)} />
+                <div className="mt-3 flex gap-2">
+                  <Btn onClick={()=>setAdminOpen(false)}>Save</Btn>
+                  <Btn variant="secondary" onClick={()=>{ setBaseUrl(''); setApiKey(''); }}>Clear</Btn>
+                </div>
+                <div className="mt-5">
+                  <div className="text-sm font-semibold mb-1">Tilt-to-nudge</div>
+                  <div className="text-xs text-slate-600 mb-2">Press once to grant motion permission. Actual movement only happens while holding <span className="font-medium">Enable</span> inside a Jog panel.</div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Btn variant={tiltEnabled ? "primary" : "secondary"} onClick={enableTilt}>{tiltEnabled? 'Tilt enabled' : 'Enable tilt sensors'}</Btn>
+                    <label className="text-sm">Gain <input type="number" className="border rounded px-2 py-1 w-24 ml-1" value={tiltGain} step="0.05" min="0.05" max="1.5" onChange={e=>setTiltGain(parseFloat(e.target.value)||0.05)}/></label>
+                  </div>
+                </div>
+                <div className="mt-5">
+                  <div className="text-sm font-semibold mb-1">Backlash calibration</div>
+                  <div className="text-xs text-slate-600 mb-2">Extra degrees added on direction change.</div>
+                  {['A','B','C','D'].map(m=>(
+                    <label key={m} className="flex items-center gap-2 mb-2">
+                      <span className="w-4">{m}</span>
+                      <input type="number" step="0.1" className="border rounded px-2 py-1 w-24" value={backlash[m] ?? 0} onChange={e=>setBacklash({...backlash,[m]:parseFloat(e.target.value)||0})} />
+                      <span className="text-xs text-slate-500">last: {lastDir[m] ?? 0}</span>
+                    </label>
+                  ))}
+                  <div className="mt-2">
+                    <Btn onClick={saveBacklash}>Save</Btn>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          )}
+
+          {/* Jog modal */}
+          {jogMotor && (
+            <div className="fixed inset-0 z-50 no-select" role="dialog" aria-modal="true" aria-labelledby="jog-title">
+              <div className="absolute inset-0 bg-black/40" onClick={()=>{ setJogMotor(null); stopHoldRepeat(); setJogEnable(false); }}></div>
+              <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-xl p-6 w-full max-w-sm">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 id="jog-title" className="text-lg font-semibold">Jog {jogMotor.name}</h3>
+                  <Btn variant="secondary" size="sm" onClick={()=>{ setJogMotor(null); stopHoldRepeat(); setJogEnable(false); }}>Close</Btn>
+                </div>
+
+                {/* Tilt indicator */}
+                <div className="mt-2">
+                  <div className="text-xs text-slate-600 mb-1 flex items-center justify-between">
+                    <span>Tilt indicator {tiltEnabled ? (tiltReady ? '(ready)' : '(awaiting permission)') : '(disabled)'}</span>
+                    <span className="font-mono">{(tiltBeta - tiltZeroRef.current).toFixed(1)}°</span>
+                  </div>
+                  <div className="h-3 rounded bg-slate-100 relative overflow-hidden">
+                    <div className="absolute left-1/2 top-0 bottom-0 w-px bg-slate-300"></div>
+                    {(() => {
+                      const def = clamp((tiltBeta - tiltZeroRef.current), -15, 15);
+                      const pct = (def / 30) * 100;
+                      const left = 50 + Math.min(0, pct);
+                      const width = Math.abs(pct);
+                      const active = jogEnable && tiltEnabled && tiltReady;
+                      return (
+                        <div
+                          className="absolute top-0 bottom-0 rounded"
+                          style={{ left: left + '%', width: width + '%', background: active ? '#2563eb' : '#94a3b8', opacity: 0.9 }}
+                        />
+                      );
+                    })()}
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-1">Bar grows with tilt. Auto-zero occurs when you press <span className="font-medium">Enable</span>.</div>
+                </div>
+
+                <div className="text-sm text-slate-600 mt-3">Hold <span className="font-medium">Enable</span> to jog by tilt. Use ±1° for discrete steps (no enable needed).</div>
+                <div className="flex items-center justify-between my-3">
+                  <Btn variant="secondary"
+                    className="w-24 pressable"
+                    onPointerDown={(e)=>{ e.preventDefault(); holdNudgeStart(jogMotor.name, -1); }}
+                    onPointerUp={stopHoldRepeat}
+                    onPointerCancel={stopHoldRepeat}
+                    onPointerLeave={stopHoldRepeat}
+                    onContextMenu={(e)=>e.preventDefault()}
+                  >-1°</Btn>
+
+                  <Btn
+                    className={cx("w-24 pressable", jogEnable? 'bg-emerald-600 text-white' : '')}
+                    variant={jogEnable? "primary" : "secondary"}
+                    onPointerDown={(e)=>{ e.preventDefault(); e.stopPropagation(); tiltZeroRef.current = tiltBeta; setJogEnable(true); }}
+                    onPointerUp={(e)=>{ e.preventDefault(); setJogEnable(false); }}
+                    onPointerCancel={()=>setJogEnable(false)}
+                    onPointerLeave={()=>setJogEnable(false)}
+                    onContextMenu={(e)=>e.preventDefault()}
+                    title="Hold to enable tilt jog"
+                  >
+                    Enable
+                  </Btn>
+
+                  <Btn
+                    className="w-24 pressable"
+                    onPointerDown={(e)=>{ e.preventDefault(); holdNudgeStart(jogMotor.name, +1); }}
+                    onPointerUp={stopHoldRepeat}
+                    onPointerCancel={stopHoldRepeat}
+                    onPointerLeave={stopHoldRepeat}
+                    onContextMenu={(e)=>e.preventDefault()}
+                  >+1°</Btn>
+                </div>
+
+                <div className="mt-3 text-sm text-slate-700">Soft limits: [{(limits[jogMotor.name]?.min ?? -9999)}°, {(limits[jogMotor.name]?.max ?? 9999)}°]</div>
+                <div className="mt-3 flex gap-2">
+                  <input
+                    type="number"
+                    className="w-24 px-2 py-1 rounded border"
+                    placeholder="min"
+                    value={limits[jogMotor.name]?.min ?? ''}
+                    onChange={e=>setLimits({...limits, [jogMotor.name]: {...(limits[jogMotor.name]||{}), min:+e.target.value}})}
+                  />
+                  <input
+                    type="number"
+                    className="w-24 px-2 py-1 rounded border"
+                    placeholder="max"
+                    value={limits[jogMotor.name]?.max ?? ''}
+                    onChange={e=>setLimits({...limits, [jogMotor.name]: {...(limits[jogMotor.name]||{}), max:+e.target.value}})}
+                  />
+                </div>
+                {!tiltEnabled && (
+                  <div className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                    Tilt sensors are disabled. Enable them once in <span className="font-medium">Admin → Tilt-to-nudge</span>.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
+```
