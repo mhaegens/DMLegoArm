@@ -130,6 +130,10 @@ Logs are written to `lego_arm_master.log` beside the script.
 
 Open the control page's **Admin** drawer and double‑click the faint `fw` label at the bottom to reveal a hidden menu. Adjust per‑motor backlash offsets there and press **Save** to update `arm_calibration.json` through `POST /v1/arm/backlash`.
 
+### Rotation calibration UI
+
+The Admin drawer also contains **Rotation calibration** to tune how many motor degrees produce one full joint rotation. Adjust the per-motor values and press **Save** to persist them via `POST /v1/arm/rotation`.
+
 ---
 
 ## Run it (quick start)
@@ -237,8 +241,8 @@ Lists available endpoints, poses, motors.
 
 ### `GET /v1/arm/state`  *(auth)*
 
-Returns current absolute degrees, software limits, motors, backlash calibration,
-and any named points captured during calibration.
+Returns current absolute degrees, software limits, motors, backlash and rotation
+calibration, and any named points captured during calibration.
 
 ```json
 {
@@ -248,6 +252,7 @@ and any named points captured during calibration.
     "limits": {"A": [-360,360], "B": [-180,180], "C": [-180,180], "D": [-90,90]},
     "motors": ["A","B","C","D"],
     "backlash": {"A":0,"B":0,"C":0,"D":0},
+    "rotation": {"A":360,"B":360,"C":360,"D":360},
     "points": {"A": {"closed": 0, "open": 90}}
   }
 }
@@ -267,6 +272,22 @@ Update backlash calibration; values are saved to `arm_calibration.json` and appl
 
 ```json
 { "A": 10, "D": 2160 }
+```
+
+### `GET /v1/arm/rotation`  *(auth)*
+
+Returns the degrees required for one full joint rotation for each motor.
+
+```json
+{ "A": 360, "B": 360, "C": 360, "D": 360 }
+```
+
+### `POST /v1/arm/rotation`  *(auth)*
+
+Update per-motor rotation calibration; values are saved to `arm_calibration.json` and applied when specifying rotations.
+
+```json
+{ "A": 400 }
 ```
 
 ### `GET /v1/arm/calibration`  *(auth)*
