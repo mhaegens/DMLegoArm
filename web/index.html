@@ -1,4 +1,4 @@
-<!-- Robot Arm Control v4.2.6 -->
+<!-- Robot Arm Control v4.3.0 (UI unified pass) -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -50,6 +50,7 @@
       C:["min","pick","max"],
       D:["assembly","neutral","quality"],
     };
+    const cx = (...classes) => classes.filter(Boolean).join(' ');
 
     function useLocalStorage(key, initial){
       const [v,setV]=useState(()=>{ try { return JSON.parse(localStorage.getItem(key)) ?? initial; } catch { return initial; } });
@@ -64,7 +65,7 @@
       return s[idx];
     }
 
-    // ---------- Icons ----------
+    // ---------- UI primitives ----------
     const Icon = ({name, className="w-5 h-5"}) => ({
       menu: <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"/></svg>,
       copy: <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2"/><path strokeWidth="2" d="M5 15V5a2 2 0 012-2h10"/></svg>,
@@ -79,6 +80,41 @@
       dl:  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" d="M12 3v12m0 0l-4-4m4 4 4-4M4 21h16"/></svg>,
       tune:<svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" d="M4 6h10M14 6v10M4 18h16M8 18V8M18 6v8"/></svg>,
     }[name] || <span/>);
+
+    const Btn = ({variant='primary', size='md', className='', children, ...props}) => {
+      const sizes = {
+        sm: 'px-2.5 py-1.5 text-sm rounded-lg',
+        md: 'px-3 py-2.5 text-sm rounded-xl',
+        lg: 'px-4 py-3 text-base rounded-xl',
+        icon: 'w-14 h-14 rounded-full flex items-center justify-center'
+      };
+      const variants = {
+        primary: 'bg-brand-600 hover:bg-brand-700 text-white border border-brand-700/20',
+        secondary: 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200',
+        ghost: 'bg-white/10 hover:bg-white/20 text-white border border-white/30',
+        outline: 'bg-white text-slate-800 border border-slate-200',
+        dark: 'bg-slate-800 text-white border border-slate-700',
+        danger: 'bg-red-600 hover:bg-red-700 text-white border border-red-700/20',
+      };
+      return <button className={cx(sizes[size]||sizes.md, variants[variant]||variants.primary, className)} {...props}>{children}</button>;
+    };
+
+    const SectionHeader = ({title, subtitle, children}) => (
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-slate-800 font-semibold">{title}</h2>
+          {subtitle && <div className="text-xs text-slate-500">{subtitle}</div>}
+        </div>
+        <div className="flex items-center gap-2">{children}</div>
+      </div>
+    );
+
+    const Panel = ({title, subtitle, actions, children}) => (
+      <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6">
+        <SectionHeader title={title} subtitle={subtitle}>{actions}</SectionHeader>
+        <div className="mt-4">{children}</div>
+      </section>
+    );
 
     const MotorPill = ({children, onClick}) => (
       <button onClick={onClick} className="glass inline-flex items-center gap-1 px-2 py-1 rounded-full text-white text-[11px] hover:bg-white/25 active:scale-[0.98] transition no-select">
@@ -137,16 +173,16 @@
       const [backlash,setBacklash]=useState({A:0,B:0,C:0,D:0});
       const [lastDir,setLastDir]=useState({A:0,B:0,C:0,D:0});
       const [namedPoints,setNamedPoints]=useState({});
-        const formattedPositions = useMemo(
-          () =>
-            motors
-              .map(m => {
-                const rot = ((m.abs ?? m.pos) / 360).toFixed(2).replace('.', ',');
-                return `${m.name}: ${rot} rot`;
-              })
-              .join('\n'),
-          [motors]
-        );
+      const formattedPositions = useMemo(
+        () =>
+          motors
+            .map(m => {
+              const rot = ((m.abs ?? m.pos) / 360).toFixed(2).replace('.', ',');
+              return `${m.name}: ${rot} rot`;
+            })
+            .join('\n'),
+        [motors]
+      );
       const formattedNamedPoints = useMemo(
         () => {
           const entries = Object.entries(namedPoints || {});
@@ -266,18 +302,11 @@
         for(const item of offlineQueue){ await api(item.method, item.path, item.body).catch(()=>{}); }
         setOfflineQueue([]);
       }
-
-      function clearQueue(){
-        setOfflineQueue([]);
-      }
+      function clearQueue(){ setOfflineQueue([]); }
 
       async function saveBacklash(){
-        try{
-          await api("POST","/v1/arm/backlash",backlash);
-          addLog({level:"ok", text:"Saved backlash"});
-        }catch{
-          addLog({level:"err", text:"Failed to save backlash"});
-        }
+        try{ await api("POST","/v1/arm/backlash",backlash); addLog({level:"ok", text:"Saved backlash"}); }
+        catch{ addLog({level:"err", text:"Failed to save backlash"}); }
       }
 
       // Calibration helpers
@@ -314,15 +343,8 @@
 
       // Health & state polling
       async function checkHealth(verbose=false){
-        if(verbose) console.log("Checking health...");
-        try{
-          await api("GET","/v1/health", undefined, {log:verbose});
-          setConnected(true);
-          if(verbose) console.log("Health check: OK");
-        } catch {
-          setConnected(false);
-          if(verbose) console.warn("Health check: FAILED");
-        }
+        try{ await api("GET","/v1/health", undefined, {log:verbose}); setConnected(true); }
+        catch{ setConnected(false); }
       }
 
       async function updatePositions(verbose=false){
@@ -336,7 +358,6 @@
               .sort((a,b)=>MOTOR_ORDER.indexOf(a.name)-MOTOR_ORDER.indexOf(b.name))
               .map((m,i)=>({id:i+1,...m}));
             setMotors(ordered);
-            if(verbose) console.log("Current positions:", ordered.map(m=>({name:m.name,pos:m.pos,abs:m.abs})));
             const sample = { t: now(), angles: Object.fromEntries(ordered.map(m=>[m.name, m.pos])) };
             setRing(prev => {
               const arr = [...prev, sample];
@@ -344,14 +365,8 @@
               return arr.filter(s => s.t >= cutoff);
             });
             setNamedPoints(s.points || {});
-          } else if(verbose) {
-            console.warn("State response missing current positions");
           }
-        } catch {
-          if(verbose) console.warn("Failed to fetch current positions");
-        } finally {
-          polling.current=false;
-        }
+        } finally { polling.current=false; }
       }
 
       async function loadInventory(show=false){
@@ -410,20 +425,13 @@
         setMotors(p=>
           p.map(x =>
             x.name === name
-              ? {
-                  ...x,
-                  pos: normalizeDeg(x.pos + deltaDeg),
-                  abs: (x.abs ?? x.pos) + deltaDeg,
-                }
+              ? { ...x, pos: normalizeDeg(x.pos + deltaDeg), abs: (x.abs ?? x.pos) + deltaDeg }
               : x
           )
         );
       }
 
-      async function refresh(verbose=false){
-        if(verbose) console.log("Refreshing positions...");
-        await updatePositions(verbose);
-      }
+      async function refresh(verbose=false){ await updatePositions(verbose); }
 
       async function runTuner({joint="A", amplitude=5, speeds=[20,40,60,80], settleMs=350}){
         const results=[];
@@ -514,56 +522,7 @@
         if(repeatRef.current){ clearInterval(repeatRef.current); repeatRef.current=null; }
       }
 
-
-      // ---------- Blend-to-pose ----------
-      function blendToPose(percent, speed=60){
-        if(!targetAngles) return;
-        const joints={};
-        for(const m of motors){
-          const tgt = targetAngles[m.name];
-          if(typeof tgt !== 'number') continue;
-          const delta = (tgt - m.pos) * (percent/100);
-          if(Math.abs(delta)>=0.5) joints[m.name]=Math.round(delta);
-        }
-        if(Object.keys(joints).length){
-          api("POST","/v1/arm/move",{mode:"relative", joints, speed}).catch(()=>{});
-        }
-      }
-
-      // ---------- Diagnostics export ----------
-      function exportDiagnostics(){
-        const blob = new Blob([JSON.stringify({
-          ts: new Date().toISOString(),
-          baseUrl,
-          inventory,
-          motors,
-          ring,
-          limits,
-          taught,
-          processes,
-          logs: logs.slice(-200),
-        }, null, 2)], {type:"application/json"});
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href=url; a.download = 'robot_diagnostics.json';
-        a.click();
-        URL.revokeObjectURL(url);
-      }
-
-      // ---------- QR Bootstrap ----------
-      function parseQr(text){
-        try {
-          const j = JSON.parse(text);
-          if(j.baseUrl) setBaseUrl(j.baseUrl);
-          if(j.apiKey) setApiKey(j.apiKey);
-          return;
-        } catch {}
-        const params = new URLSearchParams(text);
-        if(params.get('baseUrl')) setBaseUrl(params.get('baseUrl'));
-        if(params.get('apiKey')) setApiKey(params.get('apiKey'));
-      }
-
-      // ---------- Tilt-to-nudge permission + handler ----------
+      // ---------- Tilt permission + handler ----------
       async function enableTilt(){
         try{
           const Any = window.DeviceOrientationEvent;
@@ -578,7 +537,6 @@
           setTiltEnabled(true);
         }
       }
-
       useEffect(()=>{
         if(!tiltEnabled) return;
         function onOrient(e){
@@ -599,10 +557,13 @@
         return ()=> window.removeEventListener('deviceorientation', onOrient);
       }, [tiltEnabled, tiltReady, jogMotor, jogEnable, tiltGain, motors]);
 
-      // ---------- UI ----------
+      // ---------- Header subcomponents ----------
       const StatusPill = () => (
-        <div className={"inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white text-slate-800 shadow-sm ring-1 " + (connected ? 'ring-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' : 'ring-slate-200')}>
-          <span className={"w-2.5 h-2.5 rounded-full " + (connected ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]' : 'bg-slate-300')}></span>
+        <div className={cx(
+          "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white text-slate-800 shadow-sm ring-1",
+          connected ? 'ring-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' : 'ring-slate-200'
+        )}>
+          <span className={cx("w-2.5 h-2.5 rounded-full", connected ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]' : 'bg-slate-300')}></span>
           <span className="font-semibold">{connected ? "Connected" : "Offline"}</span>
         </div>
       );
@@ -623,24 +584,20 @@
               <div className="flex items-center justify-between gap-2">
                 <h1 className="text-2xl font-semibold tracking-tight drop-shadow-sm">Lego Arm Control</h1>
                 <div className="flex items-center gap-2">
-                  {/* QR icon-only button */}
-                  <button
-                    className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/30 text-white flex items-center"
-                    onClick={()=>setQrOpen(true)}
-                    title="Scan QR for config"
-                    aria-label="Scan QR"
-                  >
+                  <Btn variant="ghost" size="md" aria-label="Scan QR" title="Scan QR for config" onClick={()=>setQrOpen(true)}>
                     <Icon name="qr" />
-                  </button>
-                  {/* Calibration with label */}
-                  <button className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/30 text-white flex items-center gap-2" onClick={()=>setCalibOpen(true)} aria-label="Open calibration"><Icon name="tune" /><span>Calibrate</span></button>
-                  {/* Admin with label */}
-                  <button className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/30 text-white flex items-center gap-2" onClick={()=>setAdminOpen(true)} aria-label="Open admin settings"><Icon name="menu" /><span>Admin</span></button>
+                  </Btn>
+                  <Btn variant="ghost" size="md" onClick={()=>setCalibOpen(true)} aria-label="Open calibration">
+                    <Icon name="tune" /><span className="ml-2">Calibrate</span>
+                  </Btn>
+                  <Btn variant="ghost" size="md" onClick={()=>setAdminOpen(true)} aria-label="Open admin settings">
+                    <Icon name="menu" /><span className="ml-2">Admin</span>
+                  </Btn>
                 </div>
               </div>
             </div>
 
-            {/* Hero & stacked motor pills (click pill to open J/C/B menu) */}
+            {/* Hero & stacked motor pills */}
             <div className="relative max-w-6xl mx-auto px-4 sm:px-6 h-[18rem] sm:h-[22rem]">
               <img src="robot-arm.png" alt="Robot Arm" className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-[20%] pointer-events-none select-none max-h-[20rem] sm:max-h-[24rem] drop-shadow-[0_16px_36px_rgba(31,144,255,0.55)]" />
               <div className="absolute right-4 sm:right-6 top-1/2 -translate-y-1/2 flex flex-col gap-2 items-end">
@@ -671,69 +628,51 @@
               className="fixed z-50 bg-white rounded-xl shadow-xl border border-slate-200 p-2 flex items-center gap-2"
               style={{left: pillMenu.x + 'px', top: pillMenu.y + 'px'}}
             >
-              <button
-                className="px-2 py-1 rounded bg-slate-800 text-white text-xs"
-                onClick={()=>{ setJogMotor(pillMenu.motor); setPillMenu({open:false, motor:null, x:0, y:0}); }}
-                title="Jog"
-              >J</button>
-              <button
-                className="px-2 py-1 rounded bg-white border text-xs"
-                onClick={()=>{ sendCoast(pillMenu.motor.name, true); setPillMenu({open:false, motor:null, x:0, y:0}); }}
-                title="Coast"
-              >C</button>
-              <button
-                className="px-2 py-1 rounded bg-white border text-xs"
-                onClick={()=>{ sendCoast(pillMenu.motor.name, false); setPillMenu({open:false, motor:null, x:0, y:0}); }}
-                title="Brake"
-              >B</button>
+              <Btn size="sm" variant="dark" onClick={()=>{ setJogMotor(pillMenu.motor); setPillMenu({open:false, motor:null, x:0, y:0}); }} title="Jog">J</Btn>
+              <Btn size="sm" variant="secondary" onClick={()=>{ sendCoast(pillMenu.motor.name, true); setPillMenu({open:false, motor:null, x:0, y:0}); }} title="Coast">C</Btn>
+              <Btn size="sm" variant="secondary" onClick={()=>{ sendCoast(pillMenu.motor.name, false); setPillMenu({open:false, motor:null, x:0, y:0}); }} title="Brake">B</Btn>
             </div>
           )}
 
-          {/* Status + actions row */}
+          {/* Status + queue */}
           <div className="max-w-6xl mx-auto px-4 sm:px-6 mt-6 relative z-10 flex items-center gap-3 flex-wrap">
             <StatusPill />
             {offlineQueue.length>0 ? (
-              <button
-                className={"relative px-3 py-1.5 pr-8 rounded-lg border " + (connected ?
-                  "bg-amber-100 text-amber-900 border-amber-300" :
-                  "bg-slate-100 text-slate-700 border-slate-300 cursor-default")}
-                onClick={connected ? runQueue : undefined}
-                disabled={!connected}
-              >
-                {connected ? `Execute queued (${offlineQueue.length})` : `Queued (${offlineQueue.length})`}
-                <span
-                  className="absolute top-1/2 right-1 -translate-y-1/2 text-slate-500 hover:text-slate-700"
-                  onClick={(e)=>{ e.stopPropagation(); clearQueue(); }}
-                  role="button"
-                  aria-label="Clear queue"
-                >&times;</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <Btn
+                  variant={connected ? "secondary" : "outline"}
+                  size="md"
+                  onClick={connected ? runQueue : undefined}
+                  disabled={!connected}
+                  className={cx(!connected && "cursor-default")}
+                >
+                  {connected ? `Execute queued (${offlineQueue.length})` : `Queued (${offlineQueue.length})`}
+                </Btn>
+                <Btn variant="outline" size="md" onClick={clearQueue}>Clear</Btn>
+              </div>
             ) : null}
           </div>
 
           {/* Main */}
           <main className="max-w-6xl mx-auto px-4 sm:px-6 pt-12 sm:pt-16 pb-28 space-y-6">
-            {/* General */}
-            <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-slate-800 font-semibold">General</h2>
-                <div className="text-xs text-slate-500">Quick actions</div>
+            <Panel
+              title="General"
+              subtitle="Quick actions"
+              actions={null}
+            >
+              <div className="grid sm:grid-cols-6 gap-3">
+                <Btn onClick={()=>sendPose("home")}>Home</Btn>
+                <Btn variant="secondary" onClick={handleStop}>Stop</Btn>
+                <Btn variant="secondary" onClick={()=>sendCoast(null,true)}>Coast all</Btn>
+                <Btn variant="secondary" onClick={()=>checkHealth(true)}>Health</Btn>
+                <Btn variant="secondary" onClick={()=>loadInventory(true)}>Inventory</Btn>
               </div>
-              <div className="mt-4 grid sm:grid-cols-6 gap-3">
-                <button className="px-3 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white" onClick={()=>sendPose("home")}>Home</button>
-                <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={handleStop}>Stop</button>
-                <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={()=>sendCoast(null,true)}>Coast all</button>
-                <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={()=>checkHealth(true)}>Health</button>
-                <button className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700" onClick={()=>loadInventory(true)}>Inventory</button>
-              </div>
-            </section>
+            </Panel>
 
-            {/* Positions */}
-            <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6">
-              <div className="flex items-center justify-between mb-2">
-                <h2 className="text-slate-800 font-semibold">Positions</h2>
-                <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={()=>refresh(true)}>Refresh</button>
-              </div>
+            <Panel
+              title="Positions"
+              actions={<Btn variant="outline" onClick={()=>refresh(true)}>Refresh</Btn>}
+            >
               <pre className="bg-slate-100 rounded p-4 text-sm text-slate-800 whitespace-pre-wrap mb-4">{formattedPositions}</pre>
               <h4 className="font-semibold mb-1">Named points</h4>
               {Object.keys(namedPoints || {}).length ? (
@@ -754,7 +693,7 @@
                             return (
                               <div key={p} className="flex items-center gap-1">
                                 <span className="text-xs text-slate-500">{(+v).toFixed(1)}°</span>
-                                <button className="px-2 py-1 rounded bg-white border border-slate-200 hover:bg-slate-50 text-xs" onClick={()=>gotoNamed(m.name,p)}>{label}</button>
+                                <Btn variant="secondary" size="sm" onClick={()=>gotoNamed(m.name,p)}>{label}</Btn>
                                 <span className="text-xs text-slate-500">{(+v).toFixed(1)}°</span>
                               </div>
                             );
@@ -767,27 +706,31 @@
               ) : (
                 <div className="text-sm text-slate-500 mb-4">No named points.</div>
               )}
-              <button className="px-3 py-2 rounded-xl bg-brand-600 text-white" onClick={()=>navigator.clipboard.writeText(formattedPositions+'\n'+formattedNamedPoints)}><Icon name="copy"/><span className="ml-1 text-sm">Copy</span></button>
-            </section>
+              <Btn onClick={()=>navigator.clipboard.writeText(formattedPositions+'\n'+formattedNamedPoints)}>
+                <Icon name="copy"/><span className="ml-2">Copy</span>
+              </Btn>
+            </Panel>
 
-            {/* Telemetry & Targets */}
-            <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6">
-              <div className="flex items-center justify-between mb-2">
-                <h2 className="text-slate-800 font-semibold">Telemetry & Targets</h2>
-                <div className="flex items-center gap-2">
+            <Panel
+              title="Telemetry & Targets"
+              actions={
+                <>
                   <select className="px-2 py-1 rounded-lg border border-slate-200" value={targetPose || ''} onChange={e=>setTargetPose(e.target.value || null)}>
                     <option value="">No target</option>
                     {Object.keys(taught).map(k=><option key={k} value={k}>{k}</option>)}
                   </select>
-                  <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={()=>{
+                  <Btn variant="outline" onClick={()=>{
                     const name = prompt("Save current as pose name:");
                     if(!name) return;
                     const angles = Object.fromEntries(motors.map(m=>[m.name, m.pos]));
                     setTaught({...taught, [name]: angles});
                     setTargetPose(name);
-                  }}><Icon name="target"/> Save current as pose</button>
-                </div>
-              </div>
+                  }}>
+                    <Icon name="target"/><span className="ml-2">Save current as pose</span>
+                  </Btn>
+                </>
+              }
+            >
               <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
                 {motors.map(m=>{
                   const data = (series[m.name]||[]).map(s=>s.v).slice(-60);
@@ -827,12 +770,11 @@
                   <input type="range" min="0" max="100" defaultValue="0" onChange={e=>blendToPose(+e.target.value)}/>
                 </div>
               )}
-            </section>
+            </Panel>
 
-            {/* Nudge controls */}
-            <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-slate-800 font-semibold">Nudge controls</h2>
+            <Panel
+              title="Nudge controls"
+              actions={
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-slate-600">Units</span>
                   <select className="px-3 py-2 rounded-xl bg-white border border-slate-200" value={nudgeUnit} onChange={e=>setNudgeUnit(e.target.value)}>
@@ -853,8 +795,9 @@
                            onChange={e=>setStepRotRaw(e.target.value)} />
                   )}
                 </div>
-              </div>
-              <div className="mt-4 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              }
+            >
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {motors.map(m => (
                   <div key={m.id} className="border rounded-2xl p-4">
                     <div className="flex items-center justify-between">
@@ -866,23 +809,25 @@
                       </div>
                     </div>
                     <div className="mt-3 flex gap-2">
-                      <button className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 w-full"
-                              onClick={()=>nudge(m.name,-step*(nudgeUnit==='deg'?1:360))}>-{nudgeUnit==='deg'?stepDeg:stepRotStr}{nudgeUnit==='deg'?'°':'r'}</button>
-                      <button className="px-3 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white w-full"
-                              onClick={()=>nudge(m.name,step*(nudgeUnit==='deg'?1:360))}>+{nudgeUnit==='deg'?stepDeg:stepRotStr}{nudgeUnit==='deg'?'°':'r'}</button>
-                      <button className="px-3 py-2 rounded-xl bg-slate-800 text-white w-14 pressable" title="Jog with tilt" onClick={()=>setJogMotor(m)}>J</button>
+                      <Btn variant="secondary" className="w-full"
+                           onClick={()=>nudge(m.name,-step*(nudgeUnit==='deg'?1:360))}>
+                        -{nudgeUnit==='deg'?stepDeg:stepRotStr}{nudgeUnit==='deg'?'°':'r'}
+                      </Btn>
+                      <Btn className="w-full"
+                           onClick={()=>nudge(m.name,step*(nudgeUnit==='deg'?1:360))}>
+                        +{nudgeUnit==='deg'?stepDeg:stepRotStr}{nudgeUnit==='deg'?'°':'r'}
+                      </Btn>
+                      <Btn variant="dark" className="w-14" title="Jog with tilt" onClick={()=>setJogMotor(m)}>J</Btn>
                     </div>
                   </div>
                 ))}
               </div>
-            </section>
+            </Panel>
 
-            {/* Production processes */}
-            <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6">
-              <div className="flex items-center justify-between mb-2">
-                <h2 className="text-slate-800 font-semibold">Production processes</h2>
-                <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={refreshProcesses}>Refresh</button>
-              </div>
+            <Panel
+              title="Production processes"
+              actions={<Btn variant="outline" onClick={refreshProcesses}>Refresh</Btn>}
+            >
               {processes.length===0 ? (
                 <div className="text-sm text-slate-600">No processes available.</div>
               ) : (
@@ -890,20 +835,15 @@
                   {processes.map(name => (
                     <div key={name} className="border rounded-2xl p-3 flex items-center justify-between">
                       <div className="font-semibold">{name}</div>
-                      <button className="px-3 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white" onClick={()=>runProcess(name)}><Icon name="play"/> Run</button>
+                      <Btn onClick={()=>runProcess(name)}><Icon name="play"/><span className="ml-2">Run</span></Btn>
                     </div>
                   ))}
                 </div>
               )}
-            </section>
+            </Panel>
 
-            {/* Analytics */}
-            <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-slate-800 font-semibold">Analytics</h2>
-                <div className="text-xs text-slate-500">Reliability & tuning</div>
-              </div>
-              <div className="mt-3 grid md:grid-cols-3 gap-4">
+            <Panel title="Analytics" subtitle="Reliability & tuning">
+              <div className="grid md:grid-cols-3 gap-4">
                 <div className="border rounded-2xl p-3">
                   <div className="text-sm font-semibold">Reliability (session)</div>
                   <div className="mt-2 text-sm text-slate-700">Success: {reliab.successRate.toFixed(1)}%</div>
@@ -913,23 +853,21 @@
                 <div className="md:col-span-2 border rounded-2xl p-3">
                   <div className="flex items-center justify-between">
                     <div className="text-sm font-semibold">Speed vs Accuracy tuner</div>
-                    <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={async()=>{
+                    <Btn variant="outline" onClick={async()=>{
                       const res = await runTuner({joint: motors[0]?.name || "A"});
                       alert("Tuner results: "+JSON.stringify(res));
-                    }}>Run sweep</button>
+                    }}>Run sweep</Btn>
                   </div>
                   <div className="text-xs text-slate-600 mt-1">Runs tiny ±5° test on first joint, measures forward/return error per speed.</div>
                 </div>
               </div>
               <div className="mt-3">
-                <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={exportDiagnostics}><Icon name="dl"/> Export diagnostics</button>
+                <Btn variant="outline" onClick={exportDiagnostics}><Icon name="dl"/><span className="ml-2">Export diagnostics</span></Btn>
               </div>
-            </section>
+            </Panel>
 
-            {/* Custom request */}
-            <section className="bg-white rounded-2xl shadow ring-1 ring-slate-100 p-4 sm:p-6">
-              <h2 className="text-slate-800 font-semibold">Custom request</h2>
-              <div className="mt-4 grid sm:grid-cols-5 gap-3">
+            <Panel title="Custom request">
+              <div className="grid sm:grid-cols-5 gap-3">
                 <div>
                   <label className="block text-xs text-slate-600 mb-1">Method</label>
                   <select className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200" value={customMethod} onChange={e=>setCustomMethod(e.target.value)}>
@@ -946,33 +884,22 @@
                 </div>
               </div>
               <div className="mt-3 flex gap-2">
-                <button className="px-3 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white" onClick={async()=>{
+                <Btn onClick={async()=>{
                   let body; try{ body = customBody ? JSON.parse(customBody) : undefined; } catch { alert("Invalid JSON body"); return; }
                   await api(customMethod, customPath, body, {queueIfOffline:true});
-                }}>Send</button>
+                }}>Send</Btn>
               </div>
-            </section>
+            </Panel>
           </main>
 
           {/* Floating vertical buttons: Console (top) + Master Stop (bottom) */}
           <div className="fixed bottom-5 right-5 z-50 flex flex-col items-center gap-3">
-            <button
-              title="Open Console"
-              aria-label="Open Console"
-              className="rounded-full w-14 h-14 flex items-center justify-center shadow-lg border border-slate-300 bg-slate-800 text-white"
-              onClick={()=>setConsoleOpen(true)}
-            >
+            <Btn variant="dark" size="icon" aria-label="Open Console" title="Open Console" onClick={()=>setConsoleOpen(true)}>
               <Icon name="console" className="w-7 h-7" />
-            </button>
-            <button
-              title="Master Stop (Esc)"
-              aria-label="Master Stop"
-              className="rounded-full w-14 h-14 flex items-center justify-center shadow-lg border border-red-300 text-white"
-              style={{background:'#ef4444'}}
-              onClick={handleStop}
-            >
+            </Btn>
+            <Btn variant="danger" size="icon" aria-label="Master Stop" title="Master Stop (Esc)" onClick={handleStop}>
               <Icon name="stop" className="w-7 h-7" />
-            </button>
+            </Btn>
           </div>
 
           <footer className="py-6 text-center text-xs text-slate-500">
@@ -987,7 +914,7 @@
               <div className="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-md max-h-[80vh] overflow-auto">
                 <div className="flex items-center justify-between mb-4">
                   <h3 id="inv-title" className="text-lg font-semibold text-slate-800">Inventory</h3>
-                  <button className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200" onClick={()=>setInventoryOpen(false)}>Close</button>
+                  <Btn variant="secondary" size="sm" onClick={()=>setInventoryOpen(false)}>Close</Btn>
                 </div>
                 {inventory ? (
                   <div className="text-sm text-slate-700 space-y-4">
@@ -1015,7 +942,6 @@
             </div>
           )}
 
-          {/* Positions modal */}
           {/* Console modal */}
           {consoleOpen && (
             <div className="fixed inset-0 z-50">
@@ -1024,16 +950,17 @@
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2"><Icon name="console"/><h3 className="text-lg font-semibold">Console & Timeline</h3></div>
                   <div className="flex gap-2">
-                    <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={()=>navigator.clipboard.writeText(JSON.stringify(logs,null,2))}><Icon name="copy"/><span className="ml-1 text-sm">Copy</span></button>
-                    <button className="px-3 py-2 rounded-xl bg-white border border-slate-200" onClick={()=>setLogs([])}><Icon name="trash"/><span className="ml-1 text-sm">Clear</span></button>
-                    <button className="px-3 py-2 rounded-xl bg-slate-100 border border-slate-200" onClick={()=>setConsoleOpen(false)}>Close</button>
+                    <Btn variant="outline" size="sm" onClick={()=>navigator.clipboard.writeText(JSON.stringify(logs,null,2))}><Icon name="copy"/><span className="ml-1 text-sm">Copy</span></Btn>
+                    <Btn variant="outline" size="sm" onClick={()=>setLogs([])}><Icon name="trash"/><span className="ml-1 text-sm">Clear</span></Btn>
+                    <Btn variant="secondary" size="sm" onClick={()=>setConsoleOpen(false)}>Close</Btn>
                   </div>
                 </div>
                 <div className="overflow-x-auto">
                   <div className="min-w-[520px]">
                     {logs.slice(-100).map((l,idx)=> (
                       <div key={idx} className="flex items-center gap-3 py-1 text-sm">
-                        <div className={"w-2 h-2 rounded-full " + (l.level==='err'?'bg-red-500': l.level==='ok'?'bg-emerald-500':'bg-sky-400')}></div>
+                        <div className={cx("w-2 h-2 rounded-full",
+                          l.level==='err'?'bg-red-500': l.level==='ok'?'bg-emerald-500':'bg-sky-400')}></div>
                         <div className="text-slate-500 w-24 shrink-0">{l.ts}</div>
                         <div className="shrink-0 w-20 text-slate-500">{typeof l.ms==='number'? fmtMs(l.ms) : ''}</div>
                         <div className="text-slate-800">{l.text}</div>
@@ -1047,7 +974,9 @@
                       <div key={idx} className="whitespace-pre-wrap text-sm">
                         <span className="text-brand-300">{l.ts}</span>{" "}
                         <span className={{"req":"text-sky-300","ok":"text-emerald-300","err":"text-red-300"}[l.level] || ""}>{l.text}</span>
-                        {l.body !== undefined ? (<pre className="text-xs text-slate-300 mt-1 mb-2 bg-slate-900/60 rounded p-2">{typeof l.body === "string" ? l.body.slice(0,5000) : JSON.stringify(l.body, null, 2).slice(0,5000)}</pre>) : null}
+                        {l.body !== undefined ? (<pre className="text-xs text-slate-300 mt-1 mb-2 bg-slate-900/60 rounded p-2">
+                          {typeof l.body === "string" ? l.body.slice(0,5000) : JSON.stringify(l.body, null, 2).slice(0,5000)}
+                        </pre>) : null}
                       </div>
                     ))
                   )}
@@ -1063,16 +992,16 @@
               <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2"><Icon name="qr"/><h3 className="text-lg font-semibold">Scan QR</h3></div>
-                  <button className="px-2 py-1 rounded bg-slate-100" onClick={()=>setQrOpen(false)}>Close</button>
+                  <Btn variant="secondary" size="sm" onClick={()=>setQrOpen(false)}>Close</Btn>
                 </div>
                 <video id="qr-video" className="w-full rounded border"></video>
                 <div className="mt-3">
-                  <button className="px-3 py-2 rounded-xl bg-brand-600 text-white" onClick={async()=>{
+                  <Btn onClick={async()=>{
                     if(!window.QrScanner){ alert("QR library not loaded."); return; }
                     const video=document.getElementById('qr-video');
                     const scanner=new window.QrScanner(video, result=>{ parseQr(result?.data || result); scanner.stop(); setQrOpen(false); }, {highlightScanRegion:true});
                     await scanner.start();
-                  }}>Start camera</button>
+                  }}>Start camera</Btn>
                 </div>
               </div>
             </div>
@@ -1093,7 +1022,7 @@
               <aside className="absolute right-0 top-0 h-full w-full max-w-md bg-white shadow-xl p-6 flex flex-col gap-4 pointer-events-auto">
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-lg font-semibold text-slate-800">Calibration</h3>
-                  <button className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200" onClick={()=>setCalibOpen(false)}>Close</button>
+                  <Btn variant="secondary" size="sm" onClick={()=>setCalibOpen(false)}>Close</Btn>
                 </div>
                 <div className="space-y-4 text-sm">
                   {Object.entries(CALIB).map(([joint,points])=>(
@@ -1101,24 +1030,22 @@
                       <div className="font-semibold mb-1">Motor {joint}</div>
                       <div className="flex flex-wrap gap-2">
                         {points.map(p=>(
-                          <button
+                          <Btn
                             key={p.key}
-                            className={
-                              "px-2 py-1 rounded bg-brand-600 text-white text-xs " +
-                              (calibStatus.points?.[joint]?.[p.key] ? "opacity-50" : "")
-                            }
+                            size="sm"
+                            className={cx(calibStatus.points?.[joint]?.[p.key] && "opacity-50")}
                             onClick={()=>setCalibPoint(joint,p.key)}
                           >
                             {calibStatus.points?.[joint]?.[p.key]? `✔ ${p.label}` : p.label}
-                          </button>
+                          </Btn>
                         ))}
                       </div>
                     </div>
                   ))}
                 </div>
                 <div className="mt-2 flex gap-2">
-                  <button className="px-3 py-2 rounded-xl bg-slate-200 text-slate-700 hover:bg-slate-300" onClick={resetCalibration}>Reset</button>
-                  <button className="px-3 py-2 rounded-xl bg-brand-600 text-white disabled:opacity-50" disabled={!allSet} onClick={finalizeCalibration}>Finalize</button>
+                  <Btn variant="secondary" onClick={resetCalibration}>Reset</Btn>
+                  <Btn disabled={!allSet} onClick={finalizeCalibration}>Finalize</Btn>
                 </div>
               </aside>
             </div>);
@@ -1131,25 +1058,25 @@
               <aside className="absolute right-0 top-0 h-full w-full max-w-md bg-white shadow-xl p-6 flex flex-col gap-2">
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-lg font-semibold text-slate-800">Admin</h3>
-                  <button className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200" onClick={()=>setAdminOpen(false)}>Close</button>
+                  <Btn variant="secondary" size="sm" onClick={()=>setAdminOpen(false)}>Close</Btn>
                 </div>
                 <label className="block text-xs text-slate-600">Base URL</label>
                 <input className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200" placeholder="https://your-ngrok-url.example" value={baseUrl} onChange={e=>setBaseUrl(e.target.value)} />
-                <label className="block text-xs text-slate-600">API key (optional)</label>
+                <label className="block text-xs text-slate-600 mt-2">API key (optional)</label>
                 <input className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200" placeholder="api key..." value={apiKey} onChange={e=>setApiKey(e.target.value)} />
-                <div className="mt-2 flex gap-2">
-                  <button className="px-3 py-2 rounded-xl bg-brand-600 text-white" onClick={()=>setAdminOpen(false)}>Save</button>
-                  <button className="px-3 py-2 rounded-xl bg-white border" onClick={()=>{ setBaseUrl(''); setApiKey(''); }}>Clear</button>
+                <div className="mt-3 flex gap-2">
+                  <Btn onClick={()=>setAdminOpen(false)}>Save</Btn>
+                  <Btn variant="secondary" onClick={()=>{ setBaseUrl(''); setApiKey(''); }}>Clear</Btn>
                 </div>
-                <div className="mt-4">
+                <div className="mt-5">
                   <div className="text-sm font-semibold mb-1">Tilt-to-nudge</div>
                   <div className="text-xs text-slate-600 mb-2">Press once to grant motion permission. Actual movement only happens while holding <span className="font-medium">Enable</span> inside a Jog panel.</div>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <button className={"px-3 py-2 rounded-xl " + (tiltEnabled? 'bg-emerald-600 text-white':'bg-slate-200 text-slate-800')} onClick={enableTilt}>{tiltEnabled? 'Tilt enabled' : 'Enable tilt sensors'}</button>
-                    <label>Gain <input type="number" className="border rounded px-2 py-1 w-24" value={tiltGain} step="0.05" min="0.05" max="1.5" onChange={e=>setTiltGain(parseFloat(e.target.value)||0.05)}/></label>
+                    <Btn variant={tiltEnabled ? "primary" : "secondary"} onClick={enableTilt}>{tiltEnabled? 'Tilt enabled' : 'Enable tilt sensors'}</Btn>
+                    <label className="text-sm">Gain <input type="number" className="border rounded px-2 py-1 w-24 ml-1" value={tiltGain} step="0.05" min="0.05" max="1.5" onChange={e=>setTiltGain(parseFloat(e.target.value)||0.05)}/></label>
                   </div>
                 </div>
-                <div className="mt-4">
+                <div className="mt-5">
                   <div className="text-sm font-semibold mb-1">Backlash calibration</div>
                   <div className="text-xs text-slate-600 mb-2">Extra degrees added on direction change.</div>
                   {['A','B','C','D'].map(m=>(
@@ -1160,7 +1087,7 @@
                     </label>
                   ))}
                   <div className="mt-2">
-                    <button className="px-3 py-2 rounded-xl bg-brand-600 text-white" onClick={saveBacklash}>Save</button>
+                    <Btn onClick={saveBacklash}>Save</Btn>
                   </div>
                 </div>
               </aside>
@@ -1174,7 +1101,7 @@
               <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-xl p-6 w-full max-w-sm">
                 <div className="flex items-center justify-between mb-2">
                   <h3 id="jog-title" className="text-lg font-semibold">Jog {jogMotor.name}</h3>
-                  <button className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200" onClick={()=>{ setJogMotor(null); stopHoldRepeat(); setJogEnable(false); }}>Close</button>
+                  <Btn variant="secondary" size="sm" onClick={()=>{ setJogMotor(null); stopHoldRepeat(); setJogEnable(false); }}>Close</Btn>
                 </div>
 
                 {/* Tilt indicator */}
@@ -1204,17 +1131,18 @@
 
                 <div className="text-sm text-slate-600 mt-3">Hold <span className="font-medium">Enable</span> to jog by tilt. Use ±1° for discrete steps (no enable needed).</div>
                 <div className="flex items-center justify-between my-3">
-                  <button
-                    className="px-3 py-2 rounded-xl bg-white border border-slate-200 w-24 pressable"
+                  <Btn variant="secondary"
+                    className="w-24 pressable"
                     onPointerDown={(e)=>{ e.preventDefault(); holdNudgeStart(jogMotor.name, -1); }}
                     onPointerUp={stopHoldRepeat}
                     onPointerCancel={stopHoldRepeat}
                     onPointerLeave={stopHoldRepeat}
                     onContextMenu={(e)=>e.preventDefault()}
-                  >-1°</button>
+                  >-1°</Btn>
 
-                  <button
-                    className={"px-3 py-2 rounded-xl w-24 pressable " + (jogEnable? 'bg-emerald-600 text-white':'bg-slate-200 text-slate-800')}
+                  <Btn
+                    className={cx("w-24 pressable", jogEnable? 'bg-emerald-600 text-white' : '')}
+                    variant={jogEnable? "primary" : "secondary"}
                     onPointerDown={(e)=>{ e.preventDefault(); e.stopPropagation(); tiltZeroRef.current = tiltBeta; setJogEnable(true); }}
                     onPointerUp={(e)=>{ e.preventDefault(); setJogEnable(false); }}
                     onPointerCancel={()=>setJogEnable(false)}
@@ -1223,16 +1151,16 @@
                     title="Hold to enable tilt jog"
                   >
                     Enable
-                  </button>
+                  </Btn>
 
-                  <button
-                    className="px-3 py-2 rounded-xl bg-brand-600 text-white w-24 pressable"
+                  <Btn
+                    className="w-24 pressable"
                     onPointerDown={(e)=>{ e.preventDefault(); holdNudgeStart(jogMotor.name, +1); }}
                     onPointerUp={stopHoldRepeat}
                     onPointerCancel={stopHoldRepeat}
                     onPointerLeave={stopHoldRepeat}
                     onContextMenu={(e)=>e.preventDefault()}
-                  >+1°</button>
+                  >+1°</Btn>
                 </div>
 
                 <div className="mt-3 text-sm text-slate-700">Soft limits: [{(limits[jogMotor.name]?.min ?? -9999)}°, {(limits[jogMotor.name]?.max ?? 9999)}°]</div>
