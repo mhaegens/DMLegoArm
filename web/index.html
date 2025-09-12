@@ -172,17 +172,18 @@
       const [calibOpen,setCalibOpen]=useState(false);
       const [calibStatus,setCalibStatus]=useState({points:{},calibrated:false});
       const [backlash,setBacklash]=useState({A:0,B:0,C:0,D:0});
+      const [rotCal,setRotCal]=useState({A:360,B:360,C:360,D:360});
       const [lastDir,setLastDir]=useState({A:0,B:0,C:0,D:0});
       const [namedPoints,setNamedPoints]=useState({});
       const formattedPositions = useMemo(
         () =>
           motors
             .map(m => {
-              const rot = ((m.abs ?? m.pos) / 360).toFixed(2).replace('.', ',');
+              const rot = ((m.abs ?? m.pos) / (rotCal[m.name] || 360)).toFixed(2).replace('.', ',');
               return `${m.name}: ${rot} rot`;
             })
             .join('\n'),
-        [motors]
+        [motors, rotCal]
       );
       const formattedNamedPoints = useMemo(
         () => {
@@ -252,12 +253,16 @@
       const alive = useRef(true);
       useEffect(()=>()=>{ alive.current=false; },[]);
 
-      // Fetch backlash calibration on load so values are always visible
+      // Fetch calibration on load so values are always visible
       useEffect(()=>{
         api("GET","/v1/arm/backlash", undefined, {log:false})
           .then(d=>{
             setBacklash({A:0,B:0,C:0,D:0, ...(d?.backlash||{})});
             setLastDir({A:0,B:0,C:0,D:0, ...(d?.last_dir||{})});
+          });
+        api("GET","/v1/arm/rotation", undefined, {log:false})
+          .then(d=>{
+            setRotCal({A:360,B:360,C:360,D:360, ...(d?.rotation||{})});
           });
       },[]);
 
@@ -319,6 +324,11 @@
         catch{ addLog({level:"err", text:"Failed to save backlash"}); }
       }
 
+      async function saveRotation(){
+        try{ await api("POST","/v1/arm/rotation",rotCal); addLog({level:"ok", text:"Saved rotation calibration"}); }
+        catch{ addLog({level:"err", text:"Failed to save rotation calibration"}); }
+      }
+
       // Calibration helpers
       async function fetchCalibration(){
         const d=await api("GET","/v1/arm/calibration",undefined,{log:false}).catch(()=>null);
@@ -346,6 +356,11 @@
             .then(d=>{
               setBacklash({A:0,B:0,C:0,D:0, ...(d?.backlash||{})});
               setLastDir({A:0,B:0,C:0,D:0, ...(d?.last_dir||{})});
+            })
+            .catch(()=>{});
+          api("GET","/v1/arm/rotation", undefined, {log:false})
+            .then(d=>{
+              setRotCal({A:360,B:360,C:360,D:360, ...(d?.rotation||{})});
             })
             .catch(()=>{});
         }
@@ -1123,6 +1138,19 @@
                   <div className="flex items-center gap-2 flex-wrap">
                     <Btn variant={tiltEnabled ? "primary" : "secondary"} onClick={enableTilt}>{tiltEnabled? 'Tilt enabled' : 'Enable tilt sensors'}</Btn>
                     <label className="text-sm">Gain <input type="number" className="border rounded px-2 py-1 w-24 ml-1" value={tiltGain} step="0.05" min="0.05" max="1.5" onChange={e=>setTiltGain(parseFloat(e.target.value)||0.05)}/></label>
+                  </div>
+                </div>
+                <div className="mt-5">
+                  <div className="text-sm font-semibold mb-1">Rotation calibration</div>
+                  <div className="text-xs text-slate-600 mb-2">Degrees for one full rotation.</div>
+                  {['A','B','C','D'].map(m=>(
+                    <label key={m} className="flex items-center gap-2 mb-2">
+                      <span className="w-4">{m}</span>
+                      <input type="number" className="border rounded px-2 py-1 w-24" value={rotCal[m] ?? 360} onChange={e=>setRotCal({...rotCal,[m]:parseFloat(e.target.value)||0})} />
+                    </label>
+                  ))}
+                  <div className="mt-2">
+                    <Btn onClick={saveRotation}>Save</Btn>
                   </div>
                 </div>
                 <div className="mt-5">
