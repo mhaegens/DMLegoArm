@@ -97,13 +97,6 @@ class ArmController:
         self.backlash: Dict[str, float] = {j: 0.0 for j in self.motors}
         # Track last movement direction per motor: -1, 0, 1
         self._last_dir: Dict[str, int] = {j: 0 for j in self.motors}
-        # Flag indicating a backlash compensation is pending for the next
-        # move after a direction change.  This ensures backlash is only
-        # applied once per change in direction.
-        self._backlash_pending: Dict[str, bool] = {j: False for j in self.motors}
-        # Track cumulative degrees of extra motion commanded to compensate
-        # for backlash so logical joint positions ignore the overshoot.
-        self._backlash_offset: Dict[str, float] = {j: 0.0 for j in self.motors}
         # Named points per joint (e.g., "closed", "home").  Populated after
         # calibration and persisted in ``arm_calibration.json``.
         self.points: Dict[str, Dict[str, float]] = {j: {} for j in self.motors}
@@ -212,7 +205,7 @@ class ArmController:
                     getter = getattr(m, "get_degrees", None) or getattr(m, "get_position", None)
                     if getter:
                         try:
-                            self.current_abs[j] = float(getter()) - self._backlash_offset[j]
+                            self.current_abs[j] = float(getter())
                         except Exception:
                             pass
         return {"motors": targets, "coast": enable}
@@ -298,21 +291,11 @@ class ArmController:
                     if abs(delta) < 1e-6:
                         continue
                     dir_now = 1 if delta > 0 else -1
-                    run_delta = delta
                     backlash = self.backlash.get(j, 0.0)
-                    backlash_extra = 0.0
+                    run_delta = delta
                     if dir_now != self._last_dir[j]:
-                        # direction changed; mark to apply backlash once
-                        self._backlash_pending[j] = True
-                    if backlash and self._backlash_pending[j]:
                         run_delta += backlash * dir_now
-                        backlash_extra = backlash * dir_now
-                        # backlash applied for this direction
-                        self._backlash_pending[j] = False
                     m = self.motors[j]
-                    getter = getattr(m, "get_degrees", None) or getattr(m, "get_position", None)
-                    # track overshoot so logical position reflects only requested delta
-                    self._backlash_offset[j] += backlash_extra
                     # split long moves into chunks to avoid watchdog limits
                     remaining = run_delta
                     chunks = []
@@ -341,33 +324,12 @@ class ArmController:
                                 m.stop()
                             except Exception:
                                 pass
-                            if getter:
-                                try:
-                                    pos = float(getter())
-                                    self.current_abs[j] = pos - self._backlash_offset[j]
-                                except Exception:
-                                    pass
                             self._last_dir[j] = dir_now
                             self.stop_event.clear()
                             raise TimeoutError("Movement timed out")
-                    if getter:
-                        try:
-                            pos = float(getter())
-                            self.current_abs[j] = pos - self._backlash_offset[j]
-                        except Exception:
-                            self.current_abs[j] += delta
-                    else:
-                        self.current_abs[j] += delta
+                    self.current_abs[j] += delta
                     self._last_dir[j] = dir_now
                 self.stop_event.clear()
-                # resync all motors from hardware to avoid drift
-                for j, m in self.motors.items():
-                    getter = getattr(m, "get_degrees", None) or getattr(m, "get_position", None)
-                    if getter:
-                        try:
-                            self.current_abs[j] = float(getter()) - self._backlash_offset[j]
-                        except Exception:
-                            pass
                 self.save_calibration()
             logger.info("Move complete; new positions: %s", self.current_abs)
             return {"new_abs": self.current_abs.copy()}
@@ -535,7 +497,7 @@ class ArmController:
                     getter = getattr(m, "get_degrees", None) or getattr(m, "get_position", None)
                     if getter:
                         try:
-                            self.current_abs[j] = float(getter()) - self._backlash_offset[j]
+                            self.current_abs[j] = float(getter())
                         except Exception:
                             pass
                 if self.calibrated and "D" in self.points and "neutral" in self.points["D"]:
