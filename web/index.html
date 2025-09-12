@@ -1147,6 +1147,7 @@
                     <label key={m} className="flex items-center gap-2 mb-2">
                       <span className="w-4">{m}</span>
                       <input type="number" className="border rounded px-2 py-1 w-24" value={rotCal[m] ?? 360} onChange={e=>setRotCal({...rotCal,[m]:parseFloat(e.target.value)||0})} />
+                      <Btn variant="secondary" size="sm" onClick={()=>nudge(m, rotCal[m] ?? 360)}>Test</Btn>
                     </label>
                   ))}
                   <div className="mt-2">
