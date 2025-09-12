@@ -97,6 +97,10 @@ class ArmController:
         self.backlash: Dict[str, float] = {j: 0.0 for j in self.motors}
         # Track last movement direction per motor: -1, 0, 1
         self._last_dir: Dict[str, int] = {j: 0 for j in self.motors}
+        # Flag indicating a backlash compensation is pending for the next
+        # move after a direction change.  This ensures backlash is only
+        # applied once per change in direction.
+        self._backlash_pending: Dict[str, bool] = {j: False for j in self.motors}
         # Named points per joint (e.g., "closed", "home").  Populated after
         # calibration and persisted in ``arm_calibration.json``.
         self.points: Dict[str, Dict[str, float]] = {j: {} for j in self.motors}
@@ -293,8 +297,13 @@ class ArmController:
                     dir_now = 1 if delta > 0 else -1
                     run_delta = delta
                     backlash = self.backlash.get(j, 0.0)
-                    if backlash and self._last_dir[j] != 0 and dir_now != self._last_dir[j]:
+                    if dir_now != self._last_dir[j]:
+                        # direction changed; mark to apply backlash once
+                        self._backlash_pending[j] = True
+                    if backlash and self._backlash_pending[j]:
                         run_delta += backlash * dir_now
+                        # backlash applied for this direction
+                        self._backlash_pending[j] = False
                     m = self.motors[j]
                     getter = getattr(m, "get_degrees", None) or getattr(m, "get_position", None)
                     # split long moves into chunks to avoid watchdog limits

@@ -252,6 +252,15 @@
       const alive = useRef(true);
       useEffect(()=>()=>{ alive.current=false; },[]);
 
+      // Fetch backlash calibration on load so values are always visible
+      useEffect(()=>{
+        api("GET","/v1/arm/backlash", undefined, {log:false})
+          .then(d=>{
+            setBacklash({A:0,B:0,C:0,D:0, ...(d?.backlash||{})});
+            setLastDir({A:0,B:0,C:0,D:0, ...(d?.last_dir||{})});
+          });
+      },[]);
+
       // Pill menu outside click close
       useEffect(()=>{
         function onDocClick(e){
@@ -850,6 +859,7 @@
                           : (m.pos/360).toLocaleString('de-DE',{minimumFractionDigits:1,maximumFractionDigits:2})+'r'}
                       </div>
                     </div>
+                    <div className="mt-1 text-xs text-slate-400">Backlash {backlash[m.name] ?? 0}°</div>
                     <div className="mt-3 flex gap-2">
                       <Btn variant="secondary" className="w-full"
                            onClick={()=>nudge(m.name,-step*(nudgeUnit==='deg'?1:360))}>
