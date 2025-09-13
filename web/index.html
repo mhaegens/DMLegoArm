@@ -686,7 +686,7 @@
                     <span className="opacity-90 ml-0.5">
                       {nudgeUnit==='deg'
                         ? Math.round(m.pos)+'°'
-                        : (m.pos/360).toLocaleString('de-DE',{minimumFractionDigits:1,maximumFractionDigits:2})+'r'}
+                        : (m.pos/(rotCal[m.name]||360)).toLocaleString('de-DE',{minimumFractionDigits:1,maximumFractionDigits:2})+'r'}
                     </span>
                   </MotorPill>
                 ))}
@@ -811,7 +811,7 @@
                         <div className="text-sm text-slate-500">
                           {nudgeUnit==='deg'
                             ? Math.round(m.pos)+'°'
-                            : (m.pos/360).toLocaleString('de-DE',{minimumFractionDigits:1,maximumFractionDigits:2})+'r'}
+                            : (m.pos/(rotCal[m.name]||360)).toLocaleString('de-DE',{minimumFractionDigits:1,maximumFractionDigits:2})+'r'}
                         </div>
                       </div>
                       <div className="mt-2 flex items-center justify-between">
@@ -871,17 +871,17 @@
                       <div className="text-sm text-slate-500">
                         {nudgeUnit==='deg'
                           ? Math.round(m.pos)+'°'
-                          : (m.pos/360).toLocaleString('de-DE',{minimumFractionDigits:1,maximumFractionDigits:2})+'r'}
+                          : (m.pos/(rotCal[m.name]||360)).toLocaleString('de-DE',{minimumFractionDigits:1,maximumFractionDigits:2})+'r'}
                       </div>
                     </div>
                     <div className="mt-1 text-xs text-slate-400">Backlash {backlash[m.name] ?? 0}°</div>
                     <div className="mt-3 flex gap-2">
                       <Btn variant="secondary" className="w-full"
-                           onClick={()=>nudge(m.name,-step*(nudgeUnit==='deg'?1:360))}>
+                           onClick={()=>nudge(m.name,-step*(nudgeUnit==='deg'?1:(rotCal[m.name]||360)))}>
                         -{nudgeUnit==='deg'?stepDeg:stepRotStr}{nudgeUnit==='deg'?'°':'r'}
                       </Btn>
                       <Btn className="w-full"
-                           onClick={()=>nudge(m.name,step*(nudgeUnit==='deg'?1:360))}>
+                           onClick={()=>nudge(m.name,step*(nudgeUnit==='deg'?1:(rotCal[m.name]||360)))}>
                         +{nudgeUnit==='deg'?stepDeg:stepRotStr}{nudgeUnit==='deg'?'°':'r'}
                       </Btn>
                       <Btn variant="dark" className="w-14" title="Jog with tilt" onClick={()=>setJogMotor(m)}>J</Btn>
