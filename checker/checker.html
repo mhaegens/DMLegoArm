@@ -58,6 +58,22 @@ pre{background:#111;color:#0f0;padding:12px;white-space:pre-wrap}
 <pre id="out"></pre>
 
 <script>
+let rotCal={A:360,B:360,C:360,D:360};
+async function fetchRotation(){
+  try{
+    const base=document.getElementById('base').value.trim().replace(/\/+$/,'');
+    const key=document.getElementById('key').value.trim();
+    const headers={};
+    if(key) headers["x-api-key"]=key;
+    if(/\.ngrok/.test(base)) headers["ngrok-skip-browser-warning"]="1";
+    const res=await fetch(base+'/v1/arm/rotation',{headers});
+    const data=await res.json();
+    rotCal={...rotCal, ...(data.rotation||data.data?.rotation||{})};
+  }catch{}
+}
+fetchRotation();
+document.getElementById('base').addEventListener('change', fetchRotation);
+document.getElementById('key').addEventListener('change', fetchRotation);
 async function call(method, path, body=null, auth=false){
   // Normalize the base URL by removing trailing slashes. The previous regex
   // mistakenly removed backslashes instead of forward slashes, which could
@@ -90,7 +106,8 @@ function updateNudgeLabels(){
 document.getElementById('step').addEventListener('change', updateNudgeLabels);
 updateNudgeLabels();
 function nudge(joint, rot){
-  const body=JSON.stringify({mode:"relative", joints:{[joint]:rot}, speed:40, units:"rotations"});
+  const deg=rot*(rotCal[joint]||360);
+  const body=JSON.stringify({mode:"relative", joints:{[joint]:deg}, speed:40});
   return postJson('/v1/arm/move', body);
 }
 const moveBody=document.getElementById('moveBody');
