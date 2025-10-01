@@ -228,6 +228,9 @@
       const [jogMotor,setJogMotor]=useState(null); // {id,name,pos}
       const [jogEnable,setJogEnable]=useState(false);
       const repeatRef = useRef(null);
+      const keyboardTimersRef = useRef({});
+      const lastGamepadNudgeRef = useRef({A:0,B:0,C:0,D:0});
+      const nudgeRef = useRef(()=>{});
 
       // Tilt-to-nudge (global permission; action gated by jogEnable + jogMotor)
       const [tiltEnabled,setTiltEnabled]=useState(false);
@@ -455,6 +458,8 @@
         );
       }
 
+      useEffect(()=>{ nudgeRef.current = nudge; });
+
       async function refresh(verbose=false){ await updatePositions(verbose); }
 
       async function runTuner({joint="A", amplitude=5, speeds=[20,40,60,80], settleMs=350}){
@@ -593,6 +598,114 @@
       function stopHoldRepeat(){
         if(repeatRef.current){ clearInterval(repeatRef.current); repeatRef.current=null; }
       }
+
+      // ---------- Keyboard bindings (arrows + WASD) ----------
+      useEffect(()=>{
+        const timers = keyboardTimersRef.current;
+        const pressed = new Set();
+        const bindings = {
+          ArrowLeft: {joint:"D", dir:-1},
+          ArrowRight:{joint:"D", dir: 1},
+          ArrowUp:   {joint:"A", dir: 1},
+          ArrowDown: {joint:"A", dir:-1},
+          KeyW:      {joint:"B", dir: 1},
+          KeyS:      {joint:"B", dir:-1},
+          KeyA:      {joint:"C", dir:-1},
+          KeyD:      {joint:"C", dir: 1},
+          w:         {joint:"B", dir: 1},
+          s:         {joint:"B", dir:-1},
+          a:         {joint:"C", dir:-1},
+          d:         {joint:"C", dir: 1},
+        };
+        const stepFor = (joint, dir) => {
+          const unit = nudgeUnit === 'deg'
+            ? stepDeg
+            : (stepRot * (rotCal[joint] || 360));
+          if(!unit) return 0;
+          return dir * unit;
+        };
+        const start = (keyId, cfg) => {
+          if(!cfg || pressed.has(keyId)) return;
+          const delta = stepFor(cfg.joint, cfg.dir);
+          if(!delta) return;
+          pressed.add(keyId);
+          nudgeRef.current(cfg.joint, delta);
+          timers[keyId] = setInterval(()=> nudgeRef.current(cfg.joint, delta), 200);
+        };
+        const stop = (keyId) => {
+          pressed.delete(keyId);
+          if(timers[keyId]){
+            clearInterval(timers[keyId]);
+            delete timers[keyId];
+          }
+        };
+        const onKeyDown = (e) => {
+          const keyId = e.code || e.key;
+          const cfg = bindings[keyId] || bindings[e.key];
+          if(!cfg) return;
+          e.preventDefault();
+          start(keyId, cfg);
+        };
+        const onKeyUp = (e) => {
+          const keyId = e.code || e.key;
+          if(bindings[keyId] || bindings[e.key]){
+            stop(keyId);
+          }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        window.addEventListener('keyup', onKeyUp);
+        return () => {
+          window.removeEventListener('keydown', onKeyDown);
+          window.removeEventListener('keyup', onKeyUp);
+          Array.from(Object.keys(timers)).forEach(stop);
+        };
+      }, [nudgeUnit, rotCal, stepDeg, stepRot]);
+
+      // ---------- Gamepad (analog sticks) ----------
+      useEffect(()=>{
+        let raf = null;
+        const bindings = [
+          {axis:0, joint:"D", invert:false},
+          {axis:1, joint:"C", invert:true},
+          {axis:2, joint:"B", invert:false},
+          {axis:3, joint:"A", invert:true},
+        ];
+        const poll = () => {
+          try{
+            const pads = typeof navigator !== 'undefined' && typeof navigator.getGamepads === 'function'
+              ? navigator.getGamepads()
+              : [];
+            const pad = pads ? Array.from(pads).find(Boolean) : null;
+            if(pad && pad.axes){
+              const dead = 0.25;
+              const nowTs = performance.now();
+              bindings.forEach(({axis, joint, invert}) => {
+                const raw = pad.axes[axis] ?? 0;
+                const value = invert ? -raw : raw;
+                if(Math.abs(value) <= dead) return;
+                const last = lastGamepadNudgeRef.current[joint] || 0;
+                if(nowTs - last < 150) return;
+                const strength = (Math.abs(value) - dead) / (1 - dead);
+                const unit = nudgeUnit === 'deg'
+                  ? stepDeg
+                  : (stepRot * (rotCal[joint] || 360));
+                if(!unit) return;
+                const delta = Math.sign(value) * strength * unit;
+                if(Math.abs(delta) < 0.1) return;
+                lastGamepadNudgeRef.current[joint] = nowTs;
+                nudgeRef.current(joint, delta);
+              });
+            }
+          } catch(e) {}
+          raf = requestAnimationFrame(poll);
+        };
+        raf = requestAnimationFrame(poll);
+        return () => {
+          if(raf !== null){
+            cancelAnimationFrame(raf);
+          }
+        };
+      }, [nudgeUnit, rotCal, stepDeg, stepRot]);
 
       // ---------- Tilt permission + handler ----------
       async function enableTilt(){
