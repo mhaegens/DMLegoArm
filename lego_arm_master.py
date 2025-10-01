@@ -6,7 +6,9 @@ import uuid
 import json
 import threading
 import queue
+import socket
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
 from urllib.parse import urlparse
 from typing import Dict, Optional, Literal, Union
 import mimetypes
@@ -1053,10 +1055,53 @@ class Handler(BaseHTTPRequestHandler):
 # Entrypoint
 # ---------------------------
 
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+class DualStackThreadingHTTPServer(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+
+    def server_bind(self):
+        try:
+            self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        except (AttributeError, OSError):
+            pass
+        return super().server_bind()
+
+
+def _create_server(host: str, port: int) -> HTTPServer:
+    host = (host or "").strip()
+    wants_dual = host in ("", "0.0.0.0", "::")
+
+    if host and ":" in host:
+        return DualStackThreadingHTTPServer((host, port), Handler)
+
+    if wants_dual and socket.has_ipv6:
+        try:
+            return DualStackThreadingHTTPServer(("::", port), Handler)
+        except OSError:
+            logger.warning("IPv6 dual-stack bind failed, falling back to IPv4", exc_info=True)
+
+    bind_host = host or "0.0.0.0"
+    return ThreadingHTTPServer((bind_host, port), Handler)
+
+
 def run_server():
     port = int(os.getenv("PORT", "8000"))
-    server = HTTPServer(("0.0.0.0", port), Handler)
-    logger.info("LEGO Arm REST listening on http://0.0.0.0:%s", port)
+    host = os.getenv("HOST", "0.0.0.0")
+    server = _create_server(host, port)
+    server_address = server.server_address
+    if isinstance(server_address, tuple):
+        if len(server_address) >= 2:
+            display_host, display_port = server_address[0], server_address[1]
+        else:
+            display_host, display_port = server_address[0], port
+    else:
+        display_host, display_port = str(server_address), port
+    host_for_log = f"[{display_host}]" if ":" in display_host else display_host
+    logger.info("LEGO Arm REST listening on http://%s:%s", host_for_log, display_port)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
