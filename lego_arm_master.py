@@ -154,6 +154,8 @@ class ArmController:
         for j in self.rotation_deg:
             if not isinstance(self.rotation_deg[j], (int, float)) or self.rotation_deg[j] <= 0:
                 self.rotation_deg[j] = 360.0
+        # Keep gripper rotation mechanical – avoid using calibration as a fudge factor.
+        self.rotation_deg["A"] = 360.0
         self.save_calibration()
         # Limit definitions for each joint.  When a joint has ``None`` limits it
         # can rotate freely without clamping.  Previously the controller always
@@ -270,9 +272,14 @@ class ArmController:
             for j, v in values.items():
                 if j in self.motors:
                     try:
-                        self.rotation_deg[j] = float(v)
+                        val = float(v)
                     except (TypeError, ValueError):
                         continue
+                    if val <= 0:
+                        continue
+                    self.rotation_deg[j] = val
+            # Rotation calibration stays mechanical for the gripper.
+            self.rotation_deg["A"] = 360.0
             self.save_calibration()
             return {"rotation": self.rotation_deg.copy()}
 
@@ -344,35 +351,52 @@ class ArmController:
                 commanded: Dict[str, Union[float, str]] = {}
                 converted: Dict[str, float] = {}
                 targets: Dict[str, float] = {}
-                start_positions: Dict[str, float] = {}
-                motors_used: Dict[str, Motor] = {}
+                plan: Dict[str, dict] = {}
 
                 for joint, raw in joints.items():
                     if joint not in self.motors:
                         raise ValueError(f"Unknown joint '{joint}'")
+
+                    motor = self.motors[joint]
                     current = self.current_abs[joint]
-                    start_positions[joint] = current
-                    motors_used[joint] = self.motors[joint]
+                    rot_per = self.rotation_deg.get(joint, 360.0) or 360.0
 
                     if isinstance(raw, str):
                         target = self.resolve_point(joint, raw)
                         commanded[joint] = raw
+                        is_rotation = False
                     else:
                         value = float(raw)
                         commanded[joint] = value
                         if units == "rotations":
-                            value_deg = value * self.rotation_deg.get(joint, 360.0)
-                            target = current + value_deg if mode == "relative" else value_deg
-                        else:  # degrees
+                            is_rotation = True
                             if mode == "relative":
-                                value_deg = value
-                                target = current + value_deg
+                                target = current + value * rot_per
                             else:
-                                value_deg = value
-                                target = value_deg
+                                target = value * rot_per
+                        else:
+                            is_rotation = False
+                            if mode == "relative":
+                                target = current + value
+                            else:
+                                target = value
+
                     target = self.clamp(joint, target)
-                    converted[joint] = target - current
+                    delta_deg = target - current
+                    converted[joint] = delta_deg
                     targets[joint] = target
+
+                    entry: Dict[str, Union[Motor, float, bool]] = {
+                        "motor": motor,
+                        "start": current,
+                        "target": target,
+                        "delta_deg": delta_deg,
+                        "is_rotation": is_rotation,
+                    }
+                    if is_rotation:
+                        entry["rot_per"] = rot_per
+                        entry["delta_rot"] = delta_deg / rot_per if rot_per else 0.0
+                    plan[joint] = entry
 
                 expected_per_joint: Dict[str, float] = {}
                 for joint, delta in converted.items():
@@ -395,8 +419,8 @@ class ArmController:
                         )
                     deadline = start_time + timeout_val
 
-                for joint, target in targets.items():
-                    delta = target - start_positions[joint]
+                for joint, info in plan.items():
+                    delta = float(info["delta_deg"])
                     if abs(delta) < 1e-6:
                         continue
                     direction = 1 if delta > 0 else -1
@@ -404,39 +428,80 @@ class ArmController:
                     run_delta = delta
                     if direction != 0 and direction != self._last_dir[joint]:
                         run_delta += backlash * direction
-                    motor = motors_used[joint]
-                    max_chunk = 12000.0
-                    remaining = run_delta
-                    chunks = []
-                    while abs(remaining) > max_chunk:
-                        chunk = max_chunk if remaining > 0 else -max_chunk
-                        chunks.append(chunk)
-                        remaining -= chunk
-                    chunks.append(remaining)
-                    for idx, chunk in enumerate(chunks, 1):
+                    motor = info["motor"]  # type: ignore[assignment]
+
+                    if info.get("is_rotation"):
+                        rot_per = float(info.get("rot_per") or self.rotation_deg.get(joint, 360.0) or 360.0)
+                        requested_rot = float(info.get("delta_rot", run_delta / rot_per))
+                        run_rot = run_delta / rot_per
+                        extra_rot = run_rot - requested_rot
                         if self.stop_event.is_set():
                             self.stop_event.clear()
                             raise InterruptedError("Movement interrupted")
                         if deadline is not None and time.time() > deadline:
                             timeout_triggered = True
-                            try:
-                                motor.stop()
-                            except Exception:
-                                pass
                             self._last_dir[joint] = direction
                             self.stop_event.clear()
                             raise TimeoutError(
                                 f"Movement timed out after {timeout_val:.2f}s"
                             )
-                        logger.info(
-                            "Moving joint %s by %.2f degrees at speed %d (%d/%d)",
-                            joint,
-                            chunk,
-                            speed,
-                            idx,
-                            len(chunks),
-                        )
-                        motor.run_for_degrees(chunk, speed=speed, blocking=True)
+                        if abs(extra_rot) > 1e-6:
+                            logger.info(
+                                "Moving joint %s by %.3f rotations at speed %d (command %.3f + backlash %.3f)",
+                                joint,
+                                run_rot,
+                                speed,
+                                requested_rot,
+                                extra_rot,
+                            )
+                        else:
+                            logger.info(
+                                "Moving joint %s by %.3f rotations at speed %d",
+                                joint,
+                                run_rot,
+                                speed,
+                            )
+                        motor.run_for_rotations(run_rot, speed=speed, blocking=True)  # type: ignore[arg-type]
+                        if deadline is not None and time.time() > deadline:
+                            timeout_triggered = True
+                            self._last_dir[joint] = direction
+                            self.stop_event.clear()
+                            raise TimeoutError(
+                                f"Movement timed out after {timeout_val:.2f}s"
+                            )
+                    else:
+                        max_chunk = 12000.0
+                        remaining = run_delta
+                        chunks = []
+                        while abs(remaining) > max_chunk:
+                            chunk = max_chunk if remaining > 0 else -max_chunk
+                            chunks.append(chunk)
+                            remaining -= chunk
+                        chunks.append(remaining)
+                        for idx, chunk in enumerate(chunks, 1):
+                            if self.stop_event.is_set():
+                                self.stop_event.clear()
+                                raise InterruptedError("Movement interrupted")
+                            if deadline is not None and time.time() > deadline:
+                                timeout_triggered = True
+                                try:
+                                    motor.stop()
+                                except Exception:
+                                    pass
+                                self._last_dir[joint] = direction
+                                self.stop_event.clear()
+                                raise TimeoutError(
+                                    f"Movement timed out after {timeout_val:.2f}s"
+                                )
+                            logger.info(
+                                "Moving joint %s by %.2f degrees at speed %d (%d/%d)",
+                                joint,
+                                chunk,
+                                speed,
+                                idx,
+                                len(chunks),
+                            )
+                            motor.run_for_degrees(chunk, speed=speed, blocking=True)  # type: ignore[arg-type]
                     self._last_dir[joint] = direction
 
                 self.stop_event.clear()
@@ -454,8 +519,9 @@ class ArmController:
                             return None
                     return None
 
-                for joint, target in targets.items():
-                    motor = motors_used[joint]
+                for joint, info in plan.items():
+                    target = float(info["target"])
+                    motor = info["motor"]  # type: ignore[assignment]
                     actual = read_position(motor)
                     if actual is None:
                         actual = target
@@ -463,7 +529,7 @@ class ArmController:
                     correction = 0.0
                     if finalize and abs(error) > finalize_deadband_deg:
                         correction = error
-                        corr_speed = max(20, min(60, max(1, speed // 2)))
+                        corr_speed = max(20, speed // 2 if speed > 0 else 20)
                         logger.info(
                             "Finalizing joint %s with %.2f° correction at speed %d",
                             joint,

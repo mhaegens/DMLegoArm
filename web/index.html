@@ -525,14 +525,6 @@
         await stop();
       }
 
-      const computeDefaultTimeout = (unit, amount, speed) => {
-        if(unit !== 'rot') return null;
-        const rotations = Math.abs(amount);
-        if(rotations < 5) return null;
-        const base = 10 + rotations * 0.8 * (60 / Math.max(speed, 1));
-        return Number.isFinite(base) ? Number(base.toFixed(1)) : null;
-      };
-
       async function nudge(name, amount, speed=60, options={}){
         const unit = options.unit || nudgeUnit;
         const finalize = options.finalize ?? true;
@@ -550,13 +542,12 @@
         }
         const manualTimeout = parseNumber(timeoutOverride);
         const manual = manualTimeout && manualTimeout > 0 ? manualTimeout : null;
-        const defaultTimeout = computeDefaultTimeout(unit, magnitude, speed);
-        const chosenTimeout = options.timeout_s ?? (manual ?? defaultTimeout);
+        const chosenTimeout = options.timeout_s ?? manual ?? null;
         try{
           if(unit === 'deg'){
-            await moveDeg(name, magnitude, speed, chosenTimeout ?? null, finalize);
+            await moveDeg(name, magnitude, speed, chosenTimeout, finalize);
           }else{
-            await moveRot(name, magnitude, speed, chosenTimeout ?? null, finalize);
+            await moveRot(name, magnitude, speed, chosenTimeout, finalize);
           }
         } catch (e) {
           return;
@@ -1135,7 +1126,7 @@
                       value={timeoutOverride}
                       onChange={e=>setTimeoutOverride(e.target.value)}
                     />
-                    <div className="text-xs text-slate-500">Blank = no software timeout. Long moves auto-budget generously.</div>
+                    <div className="text-xs text-slate-500">Blank = no software timeout. Provide one only if you need a software stop.</div>
                   </div>
                   {lastMoveSummary && (
                     <div className="mt-3 text-xs text-slate-600">
