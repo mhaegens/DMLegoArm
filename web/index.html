@@ -1,4 +1,4 @@
-<!-- Robot Arm Control v4.3.1 (fix: define exportDiagnostics, blendToPose, parseQr) -->
+<!-- Robot Arm Control v4.3.2 (rotations-correct: UI sends true rotations; no rotCal multiplication; rotation readouts use ABS) -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -178,7 +178,7 @@
         () =>
           motors
             .map(m => {
-              const rot = ((m.abs ?? m.pos) / (rotCal[m.name] || 360)).toFixed(2).replace('.', ',');
+              const rot = (((m.abs ?? m.pos)) / (rotCal[m.name] || 360)).toFixed(2).replace('.', ',');
               return `${m.name}: ${rot} rot`;
             })
             .join('\n'),
@@ -469,7 +469,7 @@
           if(s?.abs_degrees){
             const ordered = Object.entries(s.abs_degrees)
               .map(([k,v])=>({name:k,pos:normalizeDeg(+v),abs:+v}))
-              .sort((a,b)=>MOTOR_ORDER.indexOf(a.name)-MOTOR_ORDER.indexOf(b.name))
+              .sort((a,b)=>["A","B","C","D","E","F"].indexOf(a.name)-["A","B","C","D","E","F"].indexOf(b.name))
               .map((m,i)=>({id:i+1,...m}));
             setMotors(ordered);
             const sample = { t: now(), angles: Object.fromEntries(ordered.map(m=>[m.name, m.pos])) };
@@ -525,6 +525,7 @@
         await stop();
       }
 
+      // ---- CORE NU D GE: sends *rotations* when unit is 'rot' (no rotCal math) ----
       async function nudge(name, amount, speed=60, options={}){
         const unit = options.unit || nudgeUnit;
         const finalize = options.finalize ?? true;
@@ -532,9 +533,10 @@
         if(!Number.isFinite(magnitude) || magnitude === 0){
           return;
         }
+        // Soft limit check in degrees (using 360° per rotation for preview)
         const lim = limits[name] || {min:-9999,max:9999};
         const current = normalizeDeg(motors.find(m=>m.name===name)?.pos ?? 0);
-        const deltaDeg = unit === 'deg' ? magnitude : magnitude * 360;
+        const deltaDeg = unit === 'deg' ? magnitude : magnitude * 360; // preview only
         const next = normalizeDeg(current + deltaDeg);
         if(next < lim.min || next > lim.max){
           addLog({level:"err", text:`Soft limit ${name}: ${next.toFixed(1)}° out of [${lim.min}, ${lim.max}]`});
@@ -552,6 +554,7 @@
         } catch (e) {
           return;
         }
+        // optimistic UI update
         setMotors(p =>
           p.map(x =>
             x.name === name
@@ -584,7 +587,7 @@
         return results;
       }
 
-      // ---- (NEW) Diagnostics export ----
+      // ---- Diagnostics export ----
       function exportDiagnostics(){
         const blob = new Blob([JSON.stringify({
           ts: new Date().toISOString(),
@@ -604,7 +607,7 @@
         URL.revokeObjectURL(url);
       }
 
-      // ---- (NEW) Blend-to-pose helper ----
+      // ---- Blend-to-pose helper ----
       function blendToPose(percent, speed=60){
         if(!targetAngles) return;
         const joints={};
@@ -619,7 +622,7 @@
         }
       }
 
-      // ---- (NEW) QR parser used by scanner ----
+      // ---- QR parser ----
       function parseQr(text){
         try {
           const j = JSON.parse(text);
@@ -908,7 +911,7 @@
                     <span className="opacity-90 ml-0.5">
                       {nudgeUnit==='deg'
                         ? Math.round(m.pos)+'°'
-                        : (m.pos/(rotCal[m.name]||360)).toLocaleString('de-DE',{minimumFractionDigits:1,maximumFractionDigits:2})+'r'}
+                        : (((m.abs ?? m.pos)/(rotCal[m.name]||360)).toLocaleString('de-DE',{minimumFractionDigits:1,maximumFractionDigits:2})+'r')}
                     </span>
                   </MotorPill>
                 ))}
@@ -1033,7 +1036,7 @@
                         <div className="text-sm text-slate-500">
                           {nudgeUnit==='deg'
                             ? Math.round(m.pos)+'°'
-                            : (m.pos/(rotCal[m.name]||360)).toLocaleString('de-DE',{minimumFractionDigits:1,maximumFractionDigits:2})+'r'}
+                            : (((m.abs ?? m.pos)/(rotCal[m.name]||360)).toLocaleString('de-DE',{minimumFractionDigits:1,maximumFractionDigits:2})+'r')}
                         </div>
                       </div>
                       <div className="mt-2 flex items-center justify-between">
@@ -1096,7 +1099,7 @@
                       <div className="text-sm text-slate-500">
                         {nudgeUnit==='deg'
                           ? Math.round(m.pos)+'°'
-                          : (m.pos/(rotCal[m.name]||360)).toLocaleString('de-DE',{minimumFractionDigits:1,maximumFractionDigits:2})+'r'}
+                          : (((m.abs ?? m.pos)/(rotCal[m.name]||360)).toLocaleString('de-DE',{minimumFractionDigits:1,maximumFractionDigits:2})+'r')}
                       </div>
                     </div>
                     <div className="mt-1 text-xs text-slate-400">Backlash {backlash[m.name] ?? 0}°</div>
