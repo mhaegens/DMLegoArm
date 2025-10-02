@@ -15,15 +15,15 @@ def run(arm) -> Any:
     # resolved by :meth:`ArmController.resolve_point`.
     steps = [
         {"A": "open", "B": "min", "C": "max", "D": "neutral"},  # Start at home
-        {"A": "open", "B": "pick", "C": "max-30", "D": "assembly"},  # Pick Right S1
-        {"A": "open-2", "B": "pick", "C": "max-80", "D": "assembly"},  # Pick Right S2
-        {"A": "closed+1", "B": "pick", "C": "max-81", "D": "assembly"},  # Grab
-        {"A": "closed+1", "B": "pick", "C": "max-81", "D": "assembly"},  # Pick Right S3
-        {"A": "closed+1", "B": "min", "C": "min", "D": "neutral"},  # Go Home for all but A
-        {"A": "closed+1", "B": "pick", "C": "max-81", "D": "quality"},  # Drop Left S1
-        {"A": "closed+1", "B": "pick", "C": "max-80", "D": "quality"},  # Drop Left S2
-        {"A": "open", "B": "pick", "C": "max-80", "D": "quality"},  # Release
-        {"A": "open", "B": "pick", "C": "max-30", "D": "quality"},  # Drop Left S3
+        {"A": "open", "B": "pick", "C": "max", "D": "assembly"},  # Pick Right S1
+        {"A": "open", "B": "pick", "C": "max", "D": "assembly"},  # Pick Right S2
+        {"A": "closed", "B": "pick", "C": "max", "D": "assembly"},  # Grab
+        {"A": "closed", "B": "pick", "C": "max", "D": "assembly"},  # Pick Right S3
+        {"A": "closed", "B": "min", "C": "min", "D": "neutral"},  # Go Home for all but A
+        {"A": "closed", "B": "pick", "C": "max", "D": "quality"},  # Drop Left S1
+        {"A": "closed", "B": "pick", "C": "max", "D": "quality"},  # Drop Left S2
+        {"A": "open", "B": "pick", "C": "max", "D": "quality"},  # Release
+        {"A": "open", "B": "pick", "C": "max", "D": "quality"},  # Drop Left S3
         {"A": "open", "B": "min", "C": "max", "D": "neutral"},  # final home
     ]
 
@@ -31,22 +31,33 @@ def run(arm) -> Any:
     abs_steps = [arm.resolve_pose(p) for p in steps]
 
     result = None
-    for i, target in enumerate(abs_steps):
-        if i > 0:
-            ok, errs = arm.verify_at(abs_steps[i - 1])
+    prev_pose = None
+    joint_order = ("D", "C", "B", "A")
+
+    for idx, target in enumerate(abs_steps):
+        if prev_pose is not None:
+            ok, errs = arm.verify_at(prev_pose)
             if not ok:
-                # If D is wildly off, treat as bad reference and recover.
                 if errs.get("D", 0) >= 720:
                     logger.error(
-                        "D reference drift (%.1f°) before step %d; recovering", errs["D"], i
+                        "D reference drift (%.1f°) before step %d; recovering", errs["D"], idx
                     )
                     arm.recover_to_home(speed=30, timeout_s=90.0)
                 else:
-                    logger.warning("DRIFT before step %d: %s; nudging back", i, errs)
-                    arm.move("absolute", abs_steps[i - 1], speed=40, units="degrees", timeout_s=60)
-                    ok2, _ = arm.verify_at(abs_steps[i - 1])
+                    logger.warning("DRIFT before step %d: %s; nudging back", idx, errs)
+                    arm.move("absolute", prev_pose, speed=40, units="degrees", timeout_s=60)
+                    ok2, _ = arm.verify_at(prev_pose)
                     if not ok2:
-                        logger.error("DRIFT persists before step %d; recovering", i)
+                        logger.error("DRIFT persists before step %d; recovering", idx)
                         arm.recover_to_home(speed=30, timeout_s=90.0)
-        result = arm.move("absolute", target, speed=speed, units="degrees")
+
+        for joint in joint_order:
+            if joint not in target:
+                continue
+            joint_target = {joint: target[joint]}
+            for _ in range(2):
+                result = arm.move("absolute", joint_target, speed=speed, units="degrees")
+
+        prev_pose = target
+
     return result
