@@ -43,10 +43,10 @@ def run(arm) -> Any:
                     arm.recover_to_home(speed=30, timeout_s=90.0)
                 else:
                     logger.warning("DRIFT before step %d: %s; nudging back", i, errs)
-                    arm.move("absolute", abs_steps[i - 1], speed=40, timeout_s=60)
+                    arm.move("absolute", abs_steps[i - 1], speed=40, units="degrees", timeout_s=60)
                     ok2, _ = arm.verify_at(abs_steps[i - 1])
                     if not ok2:
                         logger.error("DRIFT persists before step %d; recovering", i)
                         arm.recover_to_home(speed=30, timeout_s=90.0)
-        result = arm.move("absolute", target, speed=speed)
+        result = arm.move("absolute", target, speed=speed, units="degrees")
     return result

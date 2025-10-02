@@ -100,17 +100,39 @@ class ArmController:
         # Degrees the motor must rotate for one full joint rotation. Defaults to
         # 360° but can be tuned per motor via the admin UI.
         self.rotation_deg: Dict[str, float] = {j: 360.0 for j in self.motors}
+        # Empirical degrees-per-second scale factor per motor.  Used only to
+        # estimate generous timeout budgets when callers opt-in.
+        self.speed_deg_per_sec: Dict[str, float] = {j: 6.0 for j in self.motors}
         # Track last movement direction per motor: -1, 0, 1
         self._last_dir: Dict[str, int] = {j: 0 for j in self.motors}
         # Named points per joint (e.g., "closed", "home").  Populated after
         # calibration and persisted in ``arm_calibration.json``.
         self.points: Dict[str, Dict[str, float]] = {j: {} for j in self.motors}
+        self._last_move_summary: dict = {
+            "units": None,
+            "commanded": {},
+            "converted_degrees": {},
+            "speed": 0,
+            "timeout_s": None,
+            "elapsed_s": 0.0,
+            "final_error_deg": {},
+            "finalized": False,
+            "finalize_deadband_deg": 0.0,
+            "finalize_corrections": {},
+            "timeout": False,
+        }
         try:
             with open(self._calib_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self.backlash.update({j: float(data.get("backlash", {}).get(j, 0.0)) for j in self.motors})
             self.rotation_deg.update({j: float(data.get("rotation", {}).get(j, 360.0)) for j in self.motors})
             self._last_dir.update({j: int(data.get("last_dir", {}).get(j, 0)) for j in self.motors})
+            scale = data.get("speed_scale", {})
+            for j in self.motors:
+                try:
+                    self.speed_deg_per_sec[j] = float(scale.get(j, self.speed_deg_per_sec[j]))
+                except (TypeError, ValueError):
+                    pass
             pts = data.get("points", {})
             for j, mp in pts.items():
                 if j in self.points:
@@ -129,6 +151,9 @@ class ArmController:
                     self.backlash[j] = float(env)
                 except ValueError:
                     pass
+        for j in self.rotation_deg:
+            if not isinstance(self.rotation_deg[j], (int, float)) or self.rotation_deg[j] <= 0:
+                self.rotation_deg[j] = 360.0
         self.save_calibration()
         # Limit definitions for each joint.  When a joint has ``None`` limits it
         # can rotate freely without clamping.  Previously the controller always
@@ -223,6 +248,7 @@ class ArmController:
                     "backlash": self.backlash,
                     "rotation": self.rotation_deg,
                     "last_dir": self._last_dir,
+                    "speed_scale": self.speed_deg_per_sec,
                     "points": self.points,
                 }, f)
         except Exception:
@@ -272,90 +298,224 @@ class ArmController:
             raise ValueError(f"Unknown point '{base}' for joint {joint}")
         return base_val + offset
 
-    def move(self, mode: Literal["relative", "absolute"], joints: Dict[str, Union[float, str]], speed: int,
-             timeout_s: Optional[float] = None, units: Literal["degrees", "rotations"] = "degrees"):
+    def move(
+        self,
+        mode: Literal["relative", "absolute"],
+        joints: Dict[str, Union[float, str]],
+        speed: int = 60,
+        units: Literal["rotations", "degrees"] = "degrees",
+        timeout_s: Optional[float] = None,
+        finalize: bool = True,
+        finalize_deadband_deg: float = 2.0,
+    ):
+        """Move the requested joints using deterministic, unit-aware semantics."""
+
+        mode = str(mode).lower()
+        if mode not in {"relative", "absolute"}:
+            raise ValueError("mode must be 'relative' or 'absolute'")
+        units = str(units).lower()
+        if units not in {"rotations", "degrees"}:
+            raise ValueError("units must be 'rotations' or 'degrees'")
+        speed = int(speed)
+        timeout_val = None if timeout_s is None else float(timeout_s)
+
         logger.info(
-            "Move command mode=%s speed=%s units=%s joints=%s",
+            "Move command mode=%s units=%s speed=%s timeout=%s finalize=%s joints=%s",
             mode,
-            speed,
             units,
+            speed,
+            timeout_val,
+            finalize,
             joints,
         )
+
         if not self._acquire_busy():
             raise RuntimeError("BUSY")
+
+        start_time = time.time()
+        timeout_triggered = False
+
         try:
             with self.lock:
                 if self.stop_event.is_set():
                     self.stop_event.clear()
                     raise InterruptedError("Movement interrupted")
+
+                commanded: Dict[str, Union[float, str]] = {}
+                converted: Dict[str, float] = {}
                 targets: Dict[str, float] = {}
-                for j, raw in joints.items():
-                    if j not in self.motors:
-                        raise ValueError(f"Unknown joint '{j}'")
+                start_positions: Dict[str, float] = {}
+                motors_used: Dict[str, Motor] = {}
+
+                for joint, raw in joints.items():
+                    if joint not in self.motors:
+                        raise ValueError(f"Unknown joint '{joint}'")
+                    current = self.current_abs[joint]
+                    start_positions[joint] = current
+                    motors_used[joint] = self.motors[joint]
+
                     if isinstance(raw, str):
-                        target = self.resolve_point(j, raw)
+                        target = self.resolve_point(joint, raw)
+                        commanded[joint] = raw
                     else:
-                        per_rot = self.rotation_deg.get(j, 360.0)
-                        deg = float(raw) * (per_rot if units == "rotations" else 1.0)
-                        target = self.current_abs[j] + deg if mode == "relative" else deg
-                    targets[j] = self.clamp(j, target)
-                plan = {j: tgt - self.current_abs[j] for j, tgt in targets.items()}
-                # compute dynamic timeout per joint if not provided
-                timeout_map: Dict[str, float] = {}
-                for j, delta in plan.items():
-                    expected = 0.0556 * (abs(delta) / max(speed, 1))
-                    timeout_map[j] = timeout_s if timeout_s is not None else 2.0 + 1.5 * expected
-                for j, delta in plan.items():
-                    if self.stop_event.is_set():
-                        self.stop_event.clear()
-                        raise InterruptedError("Movement interrupted")
+                        value = float(raw)
+                        commanded[joint] = value
+                        if units == "rotations":
+                            value_deg = value * self.rotation_deg.get(joint, 360.0)
+                            target = current + value_deg if mode == "relative" else value_deg
+                        else:  # degrees
+                            if mode == "relative":
+                                value_deg = value
+                                target = current + value_deg
+                            else:
+                                value_deg = value
+                                target = value_deg
+                    target = self.clamp(joint, target)
+                    converted[joint] = target - current
+                    targets[joint] = target
+
+                expected_per_joint: Dict[str, float] = {}
+                for joint, delta in converted.items():
+                    if abs(delta) < 1e-6:
+                        expected_per_joint[joint] = 0.0
+                        continue
+                    deg_per_s = max(1.0, abs(self.speed_deg_per_sec.get(joint, 6.0) * max(speed, 1)))
+                    expected_per_joint[joint] = abs(delta) / deg_per_s
+
+                deadline = None
+                if timeout_val is not None:
+                    total_expected = max(expected_per_joint.values() or [0.0])
+                    recommended = 3.0 + 1.2 * total_expected
+                    if timeout_val < recommended:
+                        logger.warning(
+                            "timeout %.2fs shorter than recommended %.2fs (expected %.2fs)",
+                            timeout_val,
+                            recommended,
+                            total_expected,
+                        )
+                    deadline = start_time + timeout_val
+
+                for joint, target in targets.items():
+                    delta = target - start_positions[joint]
                     if abs(delta) < 1e-6:
                         continue
-                    dir_now = 1 if delta > 0 else -1
-                    backlash = self.backlash.get(j, 0.0)
+                    direction = 1 if delta > 0 else -1
+                    backlash = self.backlash.get(joint, 0.0)
                     run_delta = delta
-                    if dir_now != self._last_dir[j]:
-                        run_delta += backlash * dir_now
-                    m = self.motors[j]
-                    # split long moves into chunks to avoid watchdog limits
+                    if direction != 0 and direction != self._last_dir[joint]:
+                        run_delta += backlash * direction
+                    motor = motors_used[joint]
+                    max_chunk = 12000.0
                     remaining = run_delta
                     chunks = []
-                    max_chunk = 12000.0
                     while abs(remaining) > max_chunk:
                         chunk = max_chunk if remaining > 0 else -max_chunk
                         chunks.append(chunk)
                         remaining -= chunk
                     chunks.append(remaining)
-                    start_j = time.time()
                     for idx, chunk in enumerate(chunks, 1):
+                        if self.stop_event.is_set():
+                            self.stop_event.clear()
+                            raise InterruptedError("Movement interrupted")
+                        if deadline is not None and time.time() > deadline:
+                            timeout_triggered = True
+                            try:
+                                motor.stop()
+                            except Exception:
+                                pass
+                            self._last_dir[joint] = direction
+                            self.stop_event.clear()
+                            raise TimeoutError(
+                                f"Movement timed out after {timeout_val:.2f}s"
+                            )
                         logger.info(
                             "Moving joint %s by %.2f degrees at speed %d (%d/%d)",
-                            j,
+                            joint,
                             chunk,
                             speed,
                             idx,
                             len(chunks),
                         )
-                        m.run_for_degrees(chunk, speed=speed, blocking=True)
-                        if self.stop_event.is_set():
-                            self.stop_event.clear()
-                            raise InterruptedError("Movement interrupted")
-                        if time.time() - start_j > timeout_map[j]:
-                            try:
-                                m.stop()
-                            except Exception:
-                                pass
-                            self._last_dir[j] = dir_now
-                            self.stop_event.clear()
-                            raise TimeoutError("Movement timed out")
-                    self.current_abs[j] += delta
-                    self._last_dir[j] = dir_now
+                        motor.run_for_degrees(chunk, speed=speed, blocking=True)
+                    self._last_dir[joint] = direction
+
                 self.stop_event.clear()
+
+                final_positions: Dict[str, float] = {}
+                final_errors: Dict[str, float] = {}
+                finalize_corrections: Dict[str, float] = {}
+
+                def read_position(mtr: Motor) -> Optional[float]:
+                    getter = getattr(mtr, "get_degrees", None) or getattr(mtr, "get_position", None)
+                    if getter:
+                        try:
+                            return float(getter())
+                        except Exception:
+                            return None
+                    return None
+
+                for joint, target in targets.items():
+                    motor = motors_used[joint]
+                    actual = read_position(motor)
+                    if actual is None:
+                        actual = target
+                    error = target - actual
+                    correction = 0.0
+                    if finalize and abs(error) > finalize_deadband_deg:
+                        correction = error
+                        corr_speed = max(20, min(60, max(1, speed // 2)))
+                        logger.info(
+                            "Finalizing joint %s with %.2f° correction at speed %d",
+                            joint,
+                            correction,
+                            corr_speed,
+                        )
+                        motor.run_for_degrees(correction, speed=corr_speed, blocking=True)
+                        actual_after = read_position(motor)
+                        if actual_after is not None:
+                            actual = actual_after
+                        error = target - actual
+                    final_positions[joint] = actual
+                    final_errors[joint] = error
+                    finalize_corrections[joint] = correction
+                    self.current_abs[joint] = actual
+
                 self.save_calibration()
-            logger.info("Move complete; new positions: %s", self.current_abs)
-            return {"new_abs": self.current_abs.copy()}
+
+            elapsed = time.time() - start_time
+            summary = {
+                "new_abs": self.current_abs.copy(),
+                "units": units,
+                "commanded": commanded,
+                "converted_degrees": converted,
+                "speed": speed,
+                "timeout_s": timeout_val,
+                "elapsed_s": elapsed,
+                "final_error_deg": final_errors,
+                "finalized": finalize,
+                "finalize_deadband_deg": finalize_deadband_deg,
+                "finalize_corrections": finalize_corrections,
+                "timeout": timeout_triggered,
+            }
+            self._last_move_summary = summary
+            logger.info(
+                "Move complete elapsed=%.3fs converted=%s final_err=%s finalize_corr=%s",
+                elapsed,
+                converted,
+                final_errors,
+                finalize_corrections,
+            )
+            return summary
         finally:
             self._release_busy()
+
+    def last_move_summary(self) -> dict:
+        with self.lock:
+            summary = self._last_move_summary.copy()
+            for key in ("new_abs", "commanded", "converted_degrees", "final_error_deg", "finalize_corrections"):
+                if key in summary and isinstance(summary[key], dict):
+                    summary[key] = summary[key].copy()
+            return summary
 
     # ----- Calibration helpers -----
     def record_named_point(self, joint: str, name: str) -> dict:
@@ -596,7 +756,7 @@ def _gamepad_loop(device_path: Optional[str] = None) -> None:  # pragma: no cove
         if not arm._acquire_busy():
             continue
         try:
-            arm.move("relative", {joint: deg}, speed)
+            arm.move("relative", {joint: deg}, speed=speed, units="degrees")
         except Exception:
             pass
         finally:
@@ -640,12 +800,19 @@ def worker():
             req = op["request"]
             logger.info("Starting operation %s of type %s", op.get("id"), kind)
             if kind == "move":
+                deadband = req.get("finalize_deadband_deg", 2.0)
+                try:
+                    deadband_val = float(deadband)
+                except (TypeError, ValueError):
+                    deadband_val = 2.0
                 res = arm.move(
                     req.get("mode", "relative"),
                     req["joints"],
-                    int(req.get("speed", 60)),
-                    req.get("timeout_s"),
-                    req.get("units", "degrees"),
+                    speed=int(req.get("speed", 60)),
+                    units=req.get("units", "degrees"),
+                    timeout_s=req.get("timeout_s"),
+                    finalize=req.get("finalize", True),
+                    finalize_deadband_deg=deadband_val,
                 )
             elif kind == "pose":
                 res = arm.goto_pose(req["name"], int(req.get("speed", 60)))
@@ -799,6 +966,10 @@ class Handler(BaseHTTPRequestHandler):
             if (resp := auth_ok(self)):
                 return json_response(self, resp[0], resp[1])
             return json_response(self, {"ok": True, "data": {"rotation": arm.rotation_deg.copy()}})
+        if path == "/v1/arm/last_move":
+            if (resp := auth_ok(self)):
+                return json_response(self, resp[0], resp[1])
+            return json_response(self, {"ok": True, "data": arm.last_move_summary()})
         if path == "/v1/arm/calibration":
             if (resp := auth_ok(self)):
                 return json_response(self, resp[0], resp[1])
@@ -896,17 +1067,44 @@ class Handler(BaseHTTPRequestHandler):
                 joints = body.get("joints") or {}
                 speed = int(body.get("speed", 60))
                 timeout_s = body.get("timeout_s")
-                units = body.get("units", "degrees")
+                units_present = "units" in body
+                units = body.get("units") or "degrees"
+                finalize = body.get("finalize", True)
+                finalize_deadband = body.get("finalize_deadband_deg", 2.0)
                 async_exec = bool(body.get("async_exec", True))
                 if not isinstance(joints, dict) or not joints:
                     return json_response(self, {"ok": False, "error": {"code": "BAD_MOVE", "message": "Provide joints map"}}, 400)
+                units = str(units).lower()
+                if units not in {"degrees", "rotations"}:
+                    return json_response(self, {"ok": False, "error": {"code": "BAD_UNITS", "message": "units must be 'degrees' or 'rotations'"}}, 400)
+                if not units_present:
+                    logger.warning("Move request missing units; defaulting to degrees")
+                if timeout_s is not None:
+                    try:
+                        timeout_s = float(timeout_s)
+                    except (TypeError, ValueError):
+                        return json_response(self, {"ok": False, "error": {"code": "BAD_TIMEOUT", "message": "timeout_s must be a number"}}, 400)
+                try:
+                    finalize_deadband_val = float(finalize_deadband)
+                except (TypeError, ValueError):
+                    return json_response(self, {"ok": False, "error": {"code": "BAD_FINALIZE", "message": "finalize_deadband_deg must be numeric"}}, 400)
+                request_payload = {
+                    "mode": mode,
+                    "joints": joints,
+                    "speed": speed,
+                    "units": units,
+                    "finalize": bool(finalize),
+                    "finalize_deadband_deg": finalize_deadband_val,
+                }
+                if timeout_s is not None:
+                    request_payload["timeout_s"] = timeout_s
                 if async_exec:
                     op = {
                         "id": str(uuid.uuid4()),
                         "type": "move",
                         "status": "queued",
                         "submitted_at": time.time(),
-                        "request": body,
+                        "request": request_payload,
                     }
                     with ops_lock:
                         ops[op["id"]] = op
@@ -914,7 +1112,15 @@ class Handler(BaseHTTPRequestHandler):
                     resp = {"ok": True, "data": {"operation_id": op["id"], "status": op["status"]}}
                     idem_store(self, resp)
                     return json_response(self, resp)
-                res = arm.move(mode, joints, speed, timeout_s, units)
+                res = arm.move(
+                    mode,
+                    joints,
+                    speed=speed,
+                    units=units,
+                    timeout_s=timeout_s,
+                    finalize=bool(finalize),
+                    finalize_deadband_deg=finalize_deadband_val,
+                )
                 resp = {"ok": True, "data": res}
                 idem_store(self, resp)
                 return json_response(self, resp)

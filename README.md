@@ -333,18 +333,22 @@ curl -X POST https://<ngrok>/v1/arm/pose \
 
 ### `POST /v1/arm/move`  *(auth)*
 
-Relative or absolute joint moves (`A/B/C/D` in **degrees** by default). Use `"units":"rotations"` to specify counts of full rotations instead. Joint targets may also be provided as strings referencing calibrated point names, e.g. `{ "A": "closed - 10" }`.
+Relative or absolute joint moves. Always specify the intended `"units"` so the backend can preserve physical meaning end-to-end. `"degrees"` is the default for backwards compatibility (a warning is logged if omitted) while `"rotations"` expresses full motor turns. Joint targets may also be provided as strings referencing calibrated point names, e.g. `{ "A": "closed - 10" }`.
 
 ```json
 {
   "mode": "relative",                // or "absolute"
   "joints": { "A": 10, "B": -5 },    // at least one joint
-  "speed": 60,                       // 1..100
-  "timeout_s": 30,                   // optional
   "units": "degrees",               // or "rotations"
+  "speed": 60,                       // 1..100
+  "timeout_s": 30,                   // optional generous guard
+  "finalize": true,                  // corrective nudge based on encoder error
+  "finalize_deadband_deg": 2.0,      // skip finalize if within tolerance
   "async_exec": false                // true -> returns operation_id
 }
 ```
+
+When `async_exec` is `false` the response echoes the final encoder delta, applied unit conversions, and whether a timeout occurred. Callers that need to inspect the most recent move can also poll [`GET /v1/arm/last_move`](#get-v1armlast_move--auth).
 
 ### `POST /v1/arm/pickplace`  *(auth)*
 
@@ -371,6 +375,24 @@ Enable or disable coast mode on one or more motors for manual manipulation.
 ```
 
 Omit `motors` to affect all. Set `"enable": false` to restore braking.
+
+### `GET /v1/arm/last_move`  *(auth)*
+
+Returns telemetry for the most recent completed move command.
+
+```json
+{
+  "units": "rotations",
+  "commanded": {"A": 3},
+  "converted_degrees": {"A": 1080},
+  "speed": 60,
+  "elapsed_s": 2.4,
+  "final_error_deg": {"A": 1.1},
+  "finalize_corrections": {"A": 1.1},
+  "finalized": true,
+  "timeout": false
+}
+```
 
 ### `GET /v1/operations/{id}`  *(auth)*
 
