@@ -345,7 +345,9 @@ _log: function (msg, obj) {
       var payload = {
         mode: "relative",
         joints: joints,
-        speed: num("speed", 60)
+        speed: num("speed", 60),
+        units: "degrees",
+        finalize: true
       };
 
       return payload;
