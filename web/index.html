@@ -44,6 +44,14 @@
     };
     const normalizeDeg = deg => ((deg + 180) % 360 + 360) % 360 - 180;
     const MOTOR_ORDER = ["A","B","C","D","E","F"];
+    const DEFAULT_NUDGE_SPEEDS = {
+      A: 60,
+      B: 60,
+      C: 60,
+      D: 6,
+      E: 60,
+      F: 60,
+    };
     const POS_ORDER = {
       A:["open","closed"],
       B:["min","pick","max"],
@@ -171,6 +179,7 @@
       const [calibOpen,setCalibOpen]=useState(false);
       const [calibStatus,setCalibStatus]=useState({points:{},calibrated:false});
       const [backlash,setBacklash]=useState({A:0,B:0,C:0,D:0});
+      const [nudgeSpeeds, setNudgeSpeeds] = useLocalStorage("ra.nudgeSpeeds", DEFAULT_NUDGE_SPEEDS);
       const [rotCal,setRotCal]=useState({A:360,B:360,C:360,D:360});
       const [lastDir,setLastDir]=useState({A:0,B:0,C:0,D:0});
       const [namedPoints,setNamedPoints]=useState({});
@@ -197,6 +206,40 @@
         },
         [namedPoints]
       );
+
+      const getMotorNudgeSpeed = (name) => {
+        const fallback = DEFAULT_NUDGE_SPEEDS[name] ?? 60;
+        const raw = Number(nudgeSpeeds?.[name]);
+        if(Number.isFinite(raw) && raw > 0){
+          return clamp(Math.round(raw), 1, 100);
+        }
+        return fallback;
+      };
+
+      useEffect(() => {
+        setNudgeSpeeds(prev => {
+          const base = prev && typeof prev === 'object' ? prev : {};
+          const next = {...base};
+          let changed = base !== prev;
+          for(const m of motors){
+            if(next[m.name] === undefined){
+              next[m.name] = DEFAULT_NUDGE_SPEEDS[m.name] ?? 60;
+              changed = true;
+            }
+          }
+          const active = new Set(motors.map(m=>m.name));
+          for(const key of Object.keys(next)){
+            if(!active.has(key)){
+              delete next[key];
+              changed = true;
+            }
+          }
+          if(!changed){
+            return prev ?? base;
+          }
+          return next;
+        });
+      }, [motors, setNudgeSpeeds]);
 
       // Pill action menu (J/C/B) state
       const [pillMenu,setPillMenu]=useState({open:false, motor:null, x:0, y:0});
@@ -526,13 +569,19 @@
       }
 
       // ---- CORE NU D GE: sends *rotations* when unit is 'rot' (no rotCal math) ----
-      async function nudge(name, amount, speed=60, options={}){
+      async function nudge(name, amount, speed, options={}){
         const unit = options.unit || nudgeUnit;
         const finalize = options.finalize ?? true;
         const magnitude = Number(amount);
         if(!Number.isFinite(magnitude) || magnitude === 0){
           return;
         }
+        const fallbackSpeed = getMotorNudgeSpeed(name);
+        const requestedSpeed = Number(speed);
+        const effectiveSpeed = Number.isFinite(requestedSpeed) && requestedSpeed > 0
+          ? requestedSpeed
+          : fallbackSpeed;
+        const finalSpeed = clamp(effectiveSpeed, 1, 100);
         // Soft limit check in degrees (using 360° per rotation for preview)
         const lim = limits[name] || {min:-9999,max:9999};
         const current = normalizeDeg(motors.find(m=>m.name===name)?.pos ?? 0);
@@ -547,9 +596,9 @@
         const chosenTimeout = options.timeout_s ?? manual ?? null;
         try{
           if(unit === 'deg'){
-            await moveDeg(name, magnitude, speed, chosenTimeout, finalize);
+            await moveDeg(name, magnitude, finalSpeed, chosenTimeout, finalize);
           }else{
-            await moveRot(name, magnitude, speed, chosenTimeout, finalize);
+            await moveRot(name, magnitude, finalSpeed, chosenTimeout, finalize);
           }
         } catch (e) {
           return;
@@ -1103,13 +1152,37 @@
                       </div>
                     </div>
                     <div className="mt-1 text-xs text-slate-400">Backlash {backlash[m.name] ?? 0}°</div>
+                    <div className="mt-3 flex items-center gap-2">
+                      <label className="text-xs text-slate-500 uppercase tracking-wide">Speed</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        className="px-3 py-2 rounded-xl bg-white border border-slate-200 w-24"
+                        value={getMotorNudgeSpeed(m.name)}
+                        onChange={e => {
+                          const numeric = Number(e.target.value);
+                          const sanitized = Number.isFinite(numeric) && numeric > 0
+                            ? clamp(Math.round(numeric), 1, 100)
+                            : getMotorNudgeSpeed(m.name);
+                          setNudgeSpeeds(prev => {
+                            const next = {...prev};
+                            if(next[m.name] === sanitized){
+                              return prev;
+                            }
+                            next[m.name] = sanitized;
+                            return next;
+                          });
+                        }}
+                      />
+                    </div>
                     <div className="mt-3 flex gap-2">
                       <Btn variant="secondary" className="w-full"
-                           onClick={()=>nudge(m.name,-step)}>
+                           onClick={()=>nudge(m.name,-step,getMotorNudgeSpeed(m.name))}>
                         -{nudgeUnit==='deg'?stepDeg:stepRotStr}{nudgeUnit==='deg'?'°':'r'}
                       </Btn>
                       <Btn className="w-full"
-                           onClick={()=>nudge(m.name,step)}>
+                           onClick={()=>nudge(m.name,step,getMotorNudgeSpeed(m.name))}>
                         +{nudgeUnit==='deg'?stepDeg:stepRotStr}{nudgeUnit==='deg'?'°':'r'}
                       </Btn>
                       <Btn variant="dark" className="w-14" title="Jog with tilt" onClick={()=>setJogMotor(m)}>J</Btn>
