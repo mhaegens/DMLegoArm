@@ -21,7 +21,7 @@ if not logging.getLogger().handlers:  # don't duplicate if app already configure
 # ---------- Tunables ----------
 SPEED = 100                  # normal move speed
 POSE_PAUSE_S = 10.0          # pause between poses
-JOINT_PAUSE_S = 10.0         # pause after each individual joint move
+JOINT_PAUSE_S = 1.0         # pause after each individual joint move
 REPEAT_PER_JOINT = 2         # repeat the same joint command N times (settling/backlash)
 SETTLE_TIMEOUT_S = 8.0       # how long to wait for a joint to settle at target
 # ↑ IMPORTANT: widen A's tolerance to match its real ~3° resolution
