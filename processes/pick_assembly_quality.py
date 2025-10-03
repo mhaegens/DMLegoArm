@@ -24,10 +24,15 @@ POSE_PAUSE_S = 10.0          # pause between poses
 JOINT_PAUSE_S = 10.0         # pause after each individual joint move
 REPEAT_PER_JOINT = 2         # repeat the same joint command N times (settling/backlash)
 SETTLE_TIMEOUT_S = 8.0       # how long to wait for a joint to settle at target
-SETTLE_TOL = {"A": 2.0, "B": 3.0, "C": 3.0, "D": 3.0}  # per-joint tolerance in degrees
+# ↑ IMPORTANT: widen A's tolerance to match its real ~3° resolution
+SETTLE_TOL = {"A": 3.0, "B": 3.0, "C": 3.0, "D": 3.0}
 POLL_INTERVAL_S = 0.05       # verify polling interval
 RETRY_ON_FAIL = 1            # extra attempts if a joint doesn't settle
 RETRY_SLOWDOWN = 0.5         # retry at slower speed (fraction of SPEED)
+
+# Joint reachability quantization (degrees): snap targets to multiples of this
+# A requires ~3° steps per your logs; leave others unsnapped (0.0 disables).
+JOINT_QUANT_DEG: Dict[str, float] = {"A": 3.0, "B": 0.0, "C": 0.0, "D": 0.0}
 
 # Backlash-aware fine approach for D
 D_APPROACH_DIR = +1          # preferred final approach direction (+1 or -1)
@@ -39,6 +44,18 @@ D_FINE_STEP_MAX = 20.0
 D_FINE_STEP_FACTOR = 0.6     # fraction of measured error to step
 D_FINE_SETTLE_TIMEOUT_S = 1.0  # short re-check during fine corrections
 # ------------------------------
+
+
+def _snap_value(joint: str, deg: float) -> float:
+    q = JOINT_QUANT_DEG.get(joint, 0.0) or 0.0
+    if q <= 0.0:
+        return deg
+    return round(deg / q) * q
+
+
+def _snap_pose(pose_deg: Dict[str, float]) -> Dict[str, float]:
+    """Apply joint quantization to a resolved (absolute degrees) pose."""
+    return {j: _snap_value(j, float(v)) for j, v in pose_deg.items()}
 
 
 def _wait_until_settled(arm, target: Dict[str, float], timeout_s: float) -> Tuple[bool, Dict[str, float]]:
@@ -63,7 +80,6 @@ def _d_takeup_then_target(arm, target_deg: float) -> Tuple[bool, float]:
                    takeup, max(15, int(SPEED * D_FINE_SPEED_FRAC)))
     arm.move("relative", {"D": takeup}, speed=max(15, int(SPEED * D_FINE_SPEED_FRAC)), units="degrees", finalize=True)
 
-    # Now re-command the absolute target (approach from the preferred direction)
     arm.move("absolute", {"D": target_deg}, speed=max(20, int(SPEED * D_FINE_SPEED_FRAC)), units="degrees", finalize=True)
     ok, err = _d_quick_settle(arm, target_deg, timeout_s=D_FINE_SETTLE_TIMEOUT_S)
     logger.info("... D re-check after take-up: ok=%s err=%.2f°", ok, err)
@@ -71,11 +87,7 @@ def _d_takeup_then_target(arm, target_deg: float) -> Tuple[bool, float]:
 
 
 def _d_fine_correct(arm, target_deg: float) -> Tuple[bool, float]:
-    """
-    Backlash-aware fine approach for D:
-    - Try small nudges that should reduce error.
-    - If error doesn't decrease, do a take-up in the preferred direction and re-command target.
-    """
+    """Backlash-aware fine approach for D."""
     fine_speed = max(15, int(SPEED * D_FINE_SPEED_FRAC))
 
     ok, err = _d_quick_settle(arm, target_deg, timeout_s=D_FINE_SETTLE_TIMEOUT_S)
@@ -85,11 +97,8 @@ def _d_fine_correct(arm, target_deg: float) -> Tuple[bool, float]:
     last_err = err
     for k in range(1, D_FINE_RETRIES + 1):
         step = max(D_FINE_STEP_MIN, min(D_FINE_STEP_MAX, abs(err) * D_FINE_STEP_FACTOR))
-
-        # default: reduce |err|
         correction = -step if err > 0.0 else +step
 
-        # if stuck, bias to preferred final approach direction
         if k > 1 and abs(err) >= abs(last_err) - 0.2:
             correction = abs(correction) * D_APPROACH_DIR
             logger.warning("D fine-correction %d stalled (prev=%.2f°, now=%.2f°); biasing to approach dir: step=%+.2f°",
@@ -106,7 +115,6 @@ def _d_fine_correct(arm, target_deg: float) -> Tuple[bool, float]:
         if ok:
             return True, err
 
-    # still off? do one-shot take-up then absolute target
     return _d_takeup_then_target(arm, target_deg)
 
 
@@ -115,6 +123,9 @@ def _move_joint_and_validate(arm, joint: str, target_deg: float, speed: int) -> 
     One joint → absolute degrees → verify → optional retry → backlash-aware D fine-corrections → return last summary.
     Raises RuntimeError if the joint cannot settle within tolerance.
     """
+    # Snap the target to what the joint can actually hit
+    target_deg = _snap_value(joint, target_deg)
+
     last_summary: Dict[str, Any] = {}
     attempt = 0
     current_speed = speed
@@ -172,7 +183,9 @@ def run(arm) -> Any:
         ("Final home",           {"A": "open",   "B": "min",   "C": "max",  "D": "neutral"}),
     ]
 
-    abs_steps = [(name, arm.resolve_pose(pose)) for name, pose in steps]
+    # Resolve named points → absolute, then snap to joint grids
+    abs_steps_raw = [(name, arm.resolve_pose(pose)) for name, pose in steps]
+    abs_steps = [(name, _snap_pose(pose_deg)) for name, pose_deg in abs_steps_raw]
 
     result = None
     prev_pose = None
@@ -199,7 +212,6 @@ def run(arm) -> Any:
             if joint not in target_pose:
                 continue
             target_deg = float(target_pose[joint])
-
             for rep in range(1, REPEAT_PER_JOINT + 1):
                 logger.info("-- %s → %.2f° (pass %d/%d)", joint, target_deg, rep, REPEAT_PER_JOINT)
                 result = _move_joint_and_validate(arm, joint, target_deg, speed)
