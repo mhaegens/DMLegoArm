@@ -52,7 +52,7 @@ FINE_GAIN_ABC = 0.65
 FINE_STEP_MIN_ABC = 0.8
 FINE_STEP_MAX_ABC = 20.0
 FINE_GAIN_D = 0.70
-FINE_STEP_MIN_D = 0.4
+FINE_STEP_MIN_D = 1.2
 FINE_STEP_MAX_D = 8.0
 
 # Cosmetic pauses so operators can observe each move.
@@ -143,6 +143,8 @@ def _fine_correct(arm, joint: str, target: float) -> bool:
                 return True
             step = max(step_min, min(step_max, abs(error) * gain))
             correction = step if error > 0 else -step
+            if joint == "D" and 0 < abs(error) < 1.0:
+                correction = 1.0 if error > 0 else -1.0
         else:
             correction = step_min
 
@@ -154,13 +156,35 @@ def _fine_correct(arm, joint: str, target: float) -> bool:
             correction,
             speed,
         )
-        arm.move(
+        pre_pos = current if current == current else float("nan")
+        result = arm.move(
             "relative",
             {joint: correction},
             speed=min(speed, SPEED_D_MAX) if joint == "D" else speed,
             units="degrees",
             finalize=True,
         )
+
+        if joint == "D":
+            post_pos = float("nan")
+            if isinstance(result, dict):
+                new_abs = result.get("new_abs")
+                if isinstance(new_abs, dict):
+                    try:
+                        value = new_abs.get(joint)
+                        if value is not None:
+                            post_pos = float(value)
+                    except (TypeError, ValueError):
+                        post_pos = float("nan")
+            if post_pos != post_pos:
+                post_pos = _read_pos(arm, joint)
+            delta = post_pos - pre_pos if pre_pos == pre_pos and post_pos == post_pos else float("nan")
+            logger.info(
+                "D nudge telemetry: pre=%.2f post=%.2f delta=%.2f",
+                pre_pos,
+                post_pos,
+                delta,
+            )
 
         ok, _ = _verify_stable(arm, {joint: target}, timeout_s=1.0 if joint == "D" else 0.8)
         if ok:
