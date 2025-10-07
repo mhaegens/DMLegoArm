@@ -467,7 +467,11 @@ class ArmController:
                                 run_rot,
                                 speed,
                             )
-                        motor.run_for_rotations(run_rot, speed=speed, blocking=True)  # type: ignore[arg-type]
+                        run_speed = speed
+                        if run_rot < 0:
+                            run_rot = -run_rot
+                            run_speed = -run_speed
+                        motor.run_for_rotations(run_rot, speed=run_speed, blocking=True)  # type: ignore[arg-type]
                         if deadline is not None and time.time() > deadline:
                             timeout_triggered = True
                             self._last_dir[joint] = direction
@@ -507,7 +511,8 @@ class ArmController:
                                 idx,
                                 len(chunks),
                             )
-                            motor.run_for_degrees(chunk, speed=speed, blocking=True)  # type: ignore[arg-type]
+                            chunk_speed = speed if chunk >= 0 else -speed
+                            motor.run_for_degrees(abs(chunk), speed=chunk_speed, blocking=True)  # type: ignore[arg-type]
                     self._last_dir[joint] = direction
 
                 self.stop_event.clear()
@@ -544,7 +549,8 @@ class ArmController:
                             correction,
                             corr_speed,
                         )
-                        motor.run_for_degrees(correction, speed=corr_speed, blocking=True)
+                        corr_run_speed = corr_speed if correction >= 0 else -corr_speed
+                        motor.run_for_degrees(abs(correction), speed=corr_run_speed, blocking=True)
                         actual_after = read_position(motor)
                         if actual_after is not None:
                             actual = actual_after
@@ -558,7 +564,7 @@ class ArmController:
                             delta,
                         )
                     final_positions[joint] = actual
-                    final_errors[joint] = residual_error
+                    final_errors[joint] = error
                     finalize_corrections[joint] = correction
                     self.current_abs[joint] = actual
 
