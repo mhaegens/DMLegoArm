@@ -386,12 +386,15 @@ class ArmController:
                     converted[joint] = delta_deg
                     targets[joint] = target
 
-                    entry: Dict[str, Union[Motor, float, bool]] = {
+                    direction = 1 if delta_deg > 0 else -1 if delta_deg < 0 else 0
+                    entry: Dict[str, Union[Motor, float, bool, int]] = {
                         "motor": motor,
                         "start": current,
                         "target": target,
                         "delta_deg": delta_deg,
                         "is_rotation": is_rotation,
+                        "direction": direction,
+                        "backlash_comp": 0.0,
                     }
                     if is_rotation:
                         entry["rot_per"] = rot_per
@@ -426,9 +429,12 @@ class ArmController:
                     direction = 1 if delta > 0 else -1
                     backlash = self.backlash.get(joint, 0.0)
                     run_delta = delta
+                    comp = 0.0
                     if direction != 0 and direction != self._last_dir[joint]:
-                        run_delta += backlash * direction
+                        comp = backlash * direction
+                        run_delta += comp
                     motor = info["motor"]  # type: ignore[assignment]
+                    info["backlash_comp"] = comp
 
                     if info.get("is_rotation"):
                         rot_per = float(info.get("rot_per") or self.rotation_deg.get(joint, 360.0) or 360.0)
@@ -552,7 +558,7 @@ class ArmController:
                             delta,
                         )
                     final_positions[joint] = actual
-                    final_errors[joint] = error
+                    final_errors[joint] = residual_error
                     finalize_corrections[joint] = correction
                     self.current_abs[joint] = actual
 
