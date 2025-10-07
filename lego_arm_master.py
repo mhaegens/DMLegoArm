@@ -531,15 +531,13 @@ class ArmController:
                     actual = read_position(motor)
                     if actual is None:
                         actual = target
-                    comp = float(info.get("backlash_comp", 0.0))
-                    # Residual error excludes intentional backlash compensation so
-                    # finalize only corrects true tracking errors instead of undoing
-                    # the slack take-up for small moves.
-                    residual_error = (target - actual) + comp
+                    pre_actual = actual
+                    error = target - actual
                     correction = 0.0
-                    if finalize and abs(residual_error) > finalize_deadband_deg:
-                        correction = residual_error
-                        corr_speed = max(20, speed // 2 if speed > 0 else 20)
+                    local_deadband = 0.3 if joint == "D" else finalize_deadband_deg
+                    if finalize and abs(error) > local_deadband:
+                        correction = error
+                        corr_speed = 2 if joint == "D" else max(20, speed // 2 if speed > 0 else 20)
                         logger.info(
                             "Finalizing joint %s with %.2f° correction at speed %d",
                             joint,
@@ -550,7 +548,15 @@ class ArmController:
                         actual_after = read_position(motor)
                         if actual_after is not None:
                             actual = actual_after
-                        residual_error = (target - actual) + comp
+                        error = target - actual
+                    if joint == "D":
+                        delta = actual - pre_actual if pre_actual == pre_actual and actual == actual else float("nan")
+                        logger.info(
+                            "D finalize telemetry: pre=%.2f post=%.2f delta=%.2f",
+                            pre_actual,
+                            actual,
+                            delta,
+                        )
                     final_positions[joint] = actual
                     final_errors[joint] = residual_error
                     finalize_corrections[joint] = correction
