@@ -43,6 +43,7 @@ class MotionUnitTests(unittest.TestCase):
                 motor._pos = 0.0  # type: ignore[attr-defined]
             self.arm.current_abs[name] = 0.0
         self.arm._last_dir = {j: 0 for j in self.arm.motors}  # type: ignore[attr-defined]
+        self.arm.backlash = {j: 0.0 for j in self.arm.motors}
 
     def _assert_rotation(self, rotations: float, tol: float = 0.5):
         start = self.arm.current_abs["A"]
