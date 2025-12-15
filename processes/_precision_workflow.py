@@ -1,11 +1,9 @@
 """Shared precision workflow logic for production processes.
 
-The recent mechanical change made joint D (the wrist rotation) almost
-direct-drive. That removes the need for the aggressive backlash
-compensation we previously employed, but it also means we must cap the
-speed at 6 and use very small, deliberate nudges when fine-tuning.  The
-helpers in this module encapsulate that behaviour so both production
-flows can reuse it without duplicating logic.
+The production flows keep most joints fast while treating joint D (wrist
+rotation) slightly more cautiously. We still cap its top speed, but only
+to 80% of the standard rate so moves remain quick without the previous
+extreme slowdown.
 """
 
 from __future__ import annotations
@@ -30,10 +28,10 @@ SPEED_ABC_FINAL = 35
 SPEED_ABC_FINE = 25
 SEGMENT_DEG_ABC = 120.0
 
-# Joint D: always slow and precise.
-SPEED_D_MAX = 6
-SPEED_D_FINAL = 2
-SPEED_D_FINE = 1
+# Joint D: slightly slower (80% of the standard speeds).
+SPEED_D_MAX = 80
+SPEED_D_FINAL = 28
+SPEED_D_FINE = 20
 
 # Position tolerances (degrees).
 TOL = {"A": 3.0, "B": 3.0, "C": 3.0, "D": 1.0}
