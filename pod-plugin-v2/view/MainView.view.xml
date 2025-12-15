@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mvc:View
+  xmlns:mvc="sap.ui.core.mvc"
+  xmlns="sap.m"
+  xmlns:l="sap.ui.layout"
+  xmlns:form="sap.ui.layout.form"
+  controllerName="lego.haegens.plugins.legoarmv2.controller.MainView"
+  width="100%" height="100%">
+
+  <Panel id="panelPlugin" width="100%" height="100%" class="sapUiNoContentPadding">
+    <headerToolbar>
+      <Toolbar height="3rem">
+        <Title id="headerTitle" text="LEGO Arm Control V2"/>
+        <ToolbarSpacer/>
+        <Button text="Health" type="Transparent" icon="sap-icon://sys-monitor" press=".onHealth"/>
+        <Button text="Refresh State" type="Transparent" icon="sap-icon://refresh" press=".onRefreshState"/>
+        <Button text="Settings" type="Transparent" icon="sap-icon://action-settings" press=".onOpenSettings"/>
+      </Toolbar>
+    </headerToolbar>
+
+    <content>
+      <VBox width="100%" class="sapUiSmallMargin">
+
+        <MessageStrip id="statusStrip"
+          text="{view>/statusText}"
+          type="{view>/statusType}"
+          showIcon="true" />
+
+        <Panel headerText="Health & Position" class="sapUiSmallMarginTop">
+          <headerToolbar>
+            <Toolbar>
+              <Title text="Live view"/>
+              <ToolbarSpacer/>
+              <Button text="Update" icon="sap-icon://synchronize" press=".onRefreshState"/>
+            </Toolbar>
+          </headerToolbar>
+          <content>
+            <VBox class="sapUiSmallMargin">
+              <HBox justifyContent="SpaceBetween" wrap="Wrap">
+                <VBox class="sapUiSmallMarginEnd">
+                  <ObjectStatus title="Health" text="{view>/health/text}" state="{view>/health/state}" icon="sap-icon://heart"/>
+                  <Text text="Last check: {view>/health/updated}" class="sapUiTinyMarginTop"/>
+                </VBox>
+                <VBox>
+                  <ObjectStatus title="Current pose" text="{view>/poseSummary}" state="None" icon="sap-icon://locate-me"/>
+                  <Text text="Speed preset: {view>/presetSpeed} deg/s" class="sapUiTinyMarginTop"/>
+                </VBox>
+              </HBox>
+
+              <Table width="100%" inset="false" mode="None" items="{view>/positions}">
+                <headerToolbar>
+                  <Toolbar>
+                    <Title text="Joint snapshot" level="H4"/>
+                    <ToolbarSpacer/>
+                    <Button text="Copy limits" type="Transparent" press=".onCopyLimits" icon="sap-icon://copy"/>
+                  </Toolbar>
+                </headerToolbar>
+                <columns>
+                  <Column hAlign="Center"><Text text="Joint"/></Column>
+                  <Column hAlign="Center"><Text text="Degrees"/></Column>
+                  <Column hAlign="Center"><Text text="Limits"/></Column>
+                </columns>
+                <items>
+                  <ColumnListItem>
+                    <cells>
+                      <ObjectIdentifier title="{view>joint}" text="{view>label}"/>
+                      <ObjectStatus text="{view>deg}" state="None"/>
+                      <Text text="{view>limitText}"/>
+                    </cells>
+                  </ColumnListItem>
+                </items>
+              </Table>
+            </VBox>
+          </content>
+        </Panel>
+
+        <Panel headerText="Joint presets" class="sapUiSmallMarginTop">
+          <content>
+            <VBox class="sapUiSmallMargin">
+              <Toolbar design="Transparent">
+                <Title text="One-touch moves" level="H4"/>
+                <ToolbarSpacer/>
+                <Label text="Preset speed (deg/s)" labelFor="presetSpeed" class="sapUiTinyMarginEnd"/>
+                <StepInput id="presetSpeed" width="8rem" value="{view>/presetSpeed}" step="10" min="10"/>
+              </Toolbar>
+
+              <form:SimpleForm editable="true" layout="ResponsiveGridLayout" labelSpanS="12" labelSpanM="12" labelSpanL="12" columnsS="2" columnsM="3" columnsL="4">
+                <Label text="Joint A (Gripper)"/>
+                <HBox renderType="Bare" class="sapUiTinyMarginBottom">
+                  <Button text="Open" icon="sap-icon://accept" press=".onJointPresetAOpen" class="sapUiTinyMarginEnd"/>
+                  <Button text="Close" icon="sap-icon://decline" press=".onJointPresetAClose"/>
+                </HBox>
+
+                <Label text="Joint B"/>
+                <HBox renderType="Bare" class="sapUiTinyMarginBottom">
+                  <Button text="Min" press=".onJointPresetBMin" class="sapUiTinyMarginEnd"/>
+                  <Button text="Pick" press=".onJointPresetBPick" class="sapUiTinyMarginEnd"/>
+                  <Button text="Max" press=".onJointPresetBMax"/>
+                </HBox>
+
+                <Label text="Joint C"/>
+                <HBox renderType="Bare" class="sapUiTinyMarginBottom">
+                  <Button text="Min" press=".onJointPresetCMin" class="sapUiTinyMarginEnd"/>
+                  <Button text="Pick" press=".onJointPresetCPick" class="sapUiTinyMarginEnd"/>
+                  <Button text="Max" press=".onJointPresetCMax"/>
+                </HBox>
+
+                <Label text="Joint D"/>
+                <HBox renderType="Bare" class="sapUiTinyMarginBottom">
+                  <Button text="Assembly" press=".onJointPresetDAssembly" class="sapUiTinyMarginEnd"/>
+                  <Button text="Quality" press=".onJointPresetDQuality" class="sapUiTinyMarginEnd"/>
+                  <Button text="Neutral" press=".onJointPresetDNeutral"/>
+                </HBox>
+              </form:SimpleForm>
+            </VBox>
+          </content>
+        </Panel>
+
+        <Panel headerText="Pose shortcuts" class="sapUiSmallMarginTop">
+          <content>
+            <l:Grid defaultSpan="XL2 L3 M4 S12" hSpacing="1" vSpacing="1" width="100%">
+              <l:content>
+                <Button text="Pick Assembly" type="Emphasized" icon="sap-icon://factory" press=".onPosePickAssembly" tooltip="A: Open, B/C: Pick, D: Assembly" width="100%"/>
+              </l:content>
+              <l:content>
+                <Button text="Pick Quality" icon="sap-icon://quality-issue" press=".onPosePickQuality" width="100%"/>
+              </l:content>
+              <l:content>
+                <Button text="Neutral" icon="sap-icon://reset" press=".onPoseNeutral" width="100%"/>
+              </l:content>
+              <l:content>
+                <Button text="Flex" icon="sap-icon://trend-down" press=".onPoseFlex" tooltip="A: Open, B/C: Max, D: Neutral" width="100%"/>
+              </l:content>
+            </l:Grid>
+          </content>
+        </Panel>
+
+        <Panel headerText="Nudge controls" class="sapUiSmallMarginTop">
+          <content>
+            <VBox class="sapUiSmallMargin">
+              <Toolbar design="Transparent">
+                <Label text="Step (rotations)" labelFor="nudgeAmount" class="sapUiTinyMarginEnd"/>
+                <StepInput id="nudgeAmount" width="8rem" value="{view>/nudgeAmount}" step="1" min="1"/>
+                <ToolbarSpacer/>
+                <Label text="Speed (deg/s)" labelFor="nudgeSpeed" class="sapUiTinyMarginEnd"/>
+                <StepInput id="nudgeSpeed" width="8rem" value="{view>/nudgeSpeed}" step="5" min="5"/>
+              </Toolbar>
+
+              <Table width="100%" inset="false" mode="None">
+                <columns>
+                  <Column hAlign="Center"><Text text="Joint"/></Column>
+                  <Column hAlign="Center"><Text text="-"/></Column>
+                  <Column hAlign="Center"><Text text="+"/></Column>
+                </columns>
+                <items>
+                  <ColumnListItem>
+                    <cells>
+                      <Text text="A"/>
+                      <Button text="-" width="100%" press=".onNudgeAMinus"/>
+                      <Button text="+" width="100%" press=".onNudgeAPlus"/>
+                    </cells>
+                  </ColumnListItem>
+                  <ColumnListItem>
+                    <cells>
+                      <Text text="B"/>
+                      <Button text="-" width="100%" press=".onNudgeBMinus"/>
+                      <Button text="+" width="100%" press=".onNudgeBPlus"/>
+                    </cells>
+                  </ColumnListItem>
+                  <ColumnListItem>
+                    <cells>
+                      <Text text="C"/>
+                      <Button text="-" width="100%" press=".onNudgeCMinus"/>
+                      <Button text="+" width="100%" press=".onNudgeCPlus"/>
+                    </cells>
+                  </ColumnListItem>
+                  <ColumnListItem>
+                    <cells>
+                      <Text text="D"/>
+                      <Button text="-" width="100%" press=".onNudgeDMinus"/>
+                      <Button text="+" width="100%" press=".onNudgeDPlus"/>
+                    </cells>
+                  </ColumnListItem>
+                </items>
+              </Table>
+            </VBox>
+          </content>
+        </Panel>
+
+        <Panel headerText="Console" class="sapUiSmallMarginTop">
+          <headerToolbar>
+            <Toolbar>
+              <Title text="Console"/>
+              <ToolbarSpacer/>
+              <BusyIndicator id="busy" visible="{view>/busy}"/>
+              <Button text="Clear" type="Transparent" icon="sap-icon://delete" press=".onClearConsole"/>
+            </Toolbar>
+          </headerToolbar>
+          <content>
+            <TextArea id="console" width="100%" rows="10" editable="false"/>
+          </content>
+        </Panel>
+
+      </VBox>
+    </content>
+  </Panel>
+</mvc:View>

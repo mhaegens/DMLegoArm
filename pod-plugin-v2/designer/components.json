@@ -1,0 +1,15 @@
+{
+  "components": [
+    {
+      "id": "legoarmv2",
+      "type": "VIEW_PLUGIN",
+      "allowMultipleInstances": false,
+      "name": "lego.haegens.plugins.legoarmv2",
+      "propertyEditor": "lego.haegens.plugins.legoarmv2.builder.PropertyEditor",
+      "i18n": "lego.haegens.plugins.legoarmv2.i18n.i18n",
+      "productionProcessEnabled": false,
+      "productionProcessTitle": "LEGO Arm Control V2",
+      "supportedPodTypes": ["OPERATION", "WORK_CENTER"]
+    }
+  ]
+}
