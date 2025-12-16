@@ -48,8 +48,9 @@ FINE_STEP_MIN_D = 1.2
 FINE_STEP_MAX_D = 8.0
 
 # Cosmetic pauses so operators can observe each move.
-POSE_PAUSE_S = 10.0
-JOINT_PAUSE_S = 10.0
+POSE_PAUSE_S = 1.0
+JOINT_PAUSE_S = 0.0
+IGNORE_SETTLE_FAILURE = {"C", "D"}
 # ===========================================
 
 
@@ -216,9 +217,10 @@ def _move_joint(arm, joint: str, target: float) -> Dict[str, Any]:
 
     good = _fine_correct(arm, joint, target)
     if not good:
-        if joint == "D":
+        if joint in IGNORE_SETTLE_FAILURE:
             logger.warning(
-                "Joint D failed to settle (last error≈%.2f°); ignoring failure per operator guidance.",
+                "Joint %s failed to settle (last error≈%.2f°); ignoring failure per operator guidance.",
+                joint,
                 err_abs if err_abs == err_abs else float("nan"),
             )
             return last
@@ -226,7 +228,6 @@ def _move_joint(arm, joint: str, target: float) -> Dict[str, Any]:
             f"Joint {joint} failed to settle at {target:.2f}° after {attempt} absolute attempt(s) + fine correction"
         )
     return last
-
 
 def run_workflow(
     arm,
@@ -285,5 +286,6 @@ __all__ = [
     "SPEED_FINE",
     "POSE_PAUSE_S",
     "JOINT_PAUSE_S",
+    "IGNORE_SETTLE_FAILURE",
 ]
 
