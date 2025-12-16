@@ -4,7 +4,7 @@ sap.ui.define([
 ], function (ProductionUIComponent, JSONModel) {
   "use strict";
 
-  return ProductionUIComponent.extend("lego.haegens.plugins.legoarmv2.Component", {
+  return ProductionUIComponent.extend("sap.michielh.legoarm.Component", {
     metadata: { manifest: "json" },
 
     init: function () {

@@ -4,13 +4,13 @@
   xmlns="sap.m"
   xmlns:l="sap.ui.layout"
   xmlns:form="sap.ui.layout.form"
-  controllerName="lego.haegens.plugins.legoarmv2.controller.MainView"
+  controllerName="sap.michielh.legoarm.controller.MainView"
   width="100%" height="100%">
 
   <Panel id="panelPlugin" width="100%" height="100%" class="sapUiNoContentPadding">
     <headerToolbar>
       <Toolbar height="3rem">
-        <Title id="headerTitle" text="LEGO Arm Control V2"/>
+        <Title id="headerTitle" text="{i18n>appTitle}"/>
         <ToolbarSpacer/>
         <Button text="Health" type="Transparent" icon="sap-icon://sys-monitor" press=".onHealth"/>
         <Button text="Refresh State" type="Transparent" icon="sap-icon://refresh" press=".onRefreshState"/>

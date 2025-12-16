@@ -4,15 +4,15 @@ sap.ui.define([
 ], function (ResourceModel, PropertyEditor) {
   "use strict";
 
-  return PropertyEditor.extend("lego.haegens.plugins.legoarmv2.builder.PropertyEditor", {
+  return PropertyEditor.extend("sap.michielh.legoarm.builder.PropertyEditor", {
 
     constructor: function (sId, mSettings) {
       PropertyEditor.apply(this, arguments);
 
       // i18n setup (kept as-is from your original)
       this.setI18nKeyPrefix("customComponentListConfig.");
-      this.setResourceBundleName("lego.haegens.plugins.legoarmv2.i18n.builder");
-      this.setPluginResourceBundleName("lego.haegens.plugins.legoarmv2.i18n.i18n");
+      this.setResourceBundleName("sap.michielh.legoarm.i18n.builder");
+      this.setPluginResourceBundleName("sap.michielh.legoarm.i18n.i18n");
     },
 
     /**
@@ -49,8 +49,8 @@ sap.ui.define([
         // existing
         "backButtonVisible": true,
         "closeButtonVisible": true,
-        "title": "legoarmv2",
-        "text": "LEGO Arm Control V2",
+        "title": "legoarm",
+        "text": "Lego Arm V2 POD",
 
         // new
         "baseUrl": "http://legopi.local:8000",

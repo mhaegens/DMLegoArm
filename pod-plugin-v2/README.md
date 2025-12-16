@@ -1,5 +1,7 @@
 # LEGO Arm Control V2 POD Plugin
 
+Namespace: `sap.michielh.legoarm`  ·  Plugin name: `legoarm`  ·  Version: `0.0.2`  ·  Language: `EN`
+
 This folder contains a refreshed SAP Digital Manufacturing (DM) POD plugin that gives operators a richer view of the LEGO® arm and faster motion presets. The plugin is written in SAPUI5 and communicates with the zero‑dependency Python service included in this repository.
 
 ## What it does

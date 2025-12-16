@@ -18,7 +18,7 @@ sap.ui.define([
     return new Date().toISOString();
   }
 
-  return PluginViewController.extend("lego.haegens.plugins.legoarmv2.controller.MainView", {
+  return PluginViewController.extend("sap.michielh.legoarm.controller.MainView", {
     onInit: function () {
       PluginViewController.prototype.onInit.apply(this, arguments);
       this._cfg = this._loadConfig();
