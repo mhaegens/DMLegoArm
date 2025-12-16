@@ -1,0 +1,15 @@
+{
+  "components": [
+    {
+      "id": "legoarm",
+      "type": "VIEW_PLUGIN",
+      "allowMultipleInstances": false,
+      "name": "sap.michielh.legoarm",
+      "propertyEditor": "sap.michielh.legoarm.builder.PropertyEditor",
+      "i18n": "sap.michielh.legoarm.i18n.i18n",
+      "productionProcessEnabled": false,
+      "productionProcessTitle": "Lego Arm V2 POD",
+      "supportedPodTypes": ["OPERATION", "WORK_CENTER"]
+    }
+  ]
+}

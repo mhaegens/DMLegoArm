@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>LEGO Arm Control V2 POD Plugin</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+
+    <style>
+      html, body { height: 100%; margin: 0; background: #0b0f14; }
+      /* Avoid white flash before theme loads */
+      .sapUiBody { background: #0b0f14; }
+    </style>
+
+    <script id="sap-ui-bootstrap"
+      src="https://sapui5.hana.ondemand.com/resources/sap-ui-core.js"
+      data-sap-ui-theme="sap_horizon"
+      data-sap-ui-compatVersion="edge"
+      data-sap-ui-async="true"
+      data-sap-ui-oninit="module:sap/ui/core/ComponentSupport"
+      data-sap-ui-frameOptions="trusted"
+      data-sap-ui-resourceroots='{
+        "sap.michielh.legoarm": "./"
+      }'
+      data-sap-ui-libs="sap.m,sap.ui.layout">
+    </script>
+
+    <script>
+      // Minimal POD config bridge:
+      // If the POD runtime posts configuration, keep it on window for the Component to read.
+      (function () {
+        window.__POD_CONFIG__ = window.__POD_CONFIG__ || {};
+        window.addEventListener("message", function (evt) {
+          if (!evt || !evt.data) return;
+          var msg = evt.data;
+          if (msg.type === "POD_PLUGIN_CONFIG" && msg.payload) {
+            window.__POD_CONFIG__ = Object.assign({}, window.__POD_CONFIG__, msg.payload);
+            document.dispatchEvent(new CustomEvent("POD_CONFIG_UPDATED", { detail: window.__POD_CONFIG__ }));
+          }
+        }, false);
+      })();
+    </script>
+  </head>
+
+  <body class="sapUiBody" id="content">
+    <!-- The Component renders an operator-focused dashboard with health, presets, nudges and poses -->
+    <div
+      data-sap-ui-component
+      data-name="sap.michielh.legoarm"
+      data-id="legoarm-container"
+      data-settings='{"id":"legoarm"}'>
+    </div>
+  </body>
+</html>
