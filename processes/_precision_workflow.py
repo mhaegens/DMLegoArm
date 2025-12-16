@@ -189,6 +189,7 @@ def _move_joint(arm, joint: str, target: float) -> Dict[str, Any]:
     last: Dict[str, Any] = {}
     attempt = 0
     current_speed = base_speed
+    err_abs = float("nan")
 
     while True:
         attempt += 1
@@ -215,6 +216,12 @@ def _move_joint(arm, joint: str, target: float) -> Dict[str, Any]:
 
     good = _fine_correct(arm, joint, target)
     if not good:
+        if joint == "D":
+            logger.warning(
+                "Joint D failed to settle (last error≈%.2f°); ignoring failure per operator guidance.",
+                err_abs if err_abs == err_abs else float("nan"),
+            )
+            return last
         raise RuntimeError(
             f"Joint {joint} failed to settle at {target:.2f}° after {attempt} absolute attempt(s) + fine correction"
         )
