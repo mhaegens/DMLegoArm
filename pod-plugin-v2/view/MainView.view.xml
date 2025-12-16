@@ -26,7 +26,7 @@
           type="{view>/statusType}"
           showIcon="true" />
 
-        <Panel headerText="Health & Position" class="sapUiSmallMarginTop">
+        <Panel headerText="Health &amp; Position" class="sapUiSmallMarginTop">
           <headerToolbar>
             <Toolbar>
               <Title text="Live view"/>
