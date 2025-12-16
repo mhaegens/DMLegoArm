@@ -2,9 +2,6 @@
 from typing import Any
 
 
-from ._precision_workflow import SPEED_D_MAX
-
-
 def run(arm) -> Any:
     """Run joint movements across predefined points."""
 
@@ -25,6 +22,6 @@ def run(arm) -> Any:
 
     # Joint D: neutral -> assembly -> quality -> neutral
     for pos in ["neutral", "assembly", "quality", "neutral"]:
-        arm.move("absolute", {"D": pos}, speed=SPEED_D_MAX, units="degrees")
+        arm.move("absolute", {"D": pos}, speed=speed, units="degrees")
 
     return arm.goto_pose("home", speed=speed)
