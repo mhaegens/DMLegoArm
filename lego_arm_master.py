@@ -324,6 +324,12 @@ class ArmController:
         if units not in {"rotations", "degrees"}:
             raise ValueError("units must be 'rotations' or 'degrees'")
         speed = int(speed)
+        # Clamp speed to a sane magnitude. Some motor drivers interpret the
+        # sign of ``degrees/rotations`` rather than the sign of ``speed`` to
+        # choose direction, so always use a positive speed and let the motion
+        # distance carry the sign.
+        speed_mag = max(1, min(abs(speed), 100))
+        speed = speed_mag
         timeout_val = None if timeout_s is None else float(timeout_s)
 
         logger.info(
@@ -406,7 +412,10 @@ class ArmController:
                     if abs(delta) < 1e-6:
                         expected_per_joint[joint] = 0.0
                         continue
-                    deg_per_s = max(1.0, abs(self.speed_deg_per_sec.get(joint, 6.0) * max(speed, 1)))
+                    deg_per_s = max(
+                        1.0,
+                        abs(self.speed_deg_per_sec.get(joint, 6.0) * max(speed_mag, 1)),
+                    )
                     expected_per_joint[joint] = abs(delta) / deg_per_s
 
                 deadline = None
@@ -456,7 +465,7 @@ class ArmController:
                                 "Moving joint %s by %.3f rotations at speed %d (command %.3f + backlash %.3f)",
                                 joint,
                                 run_rot,
-                                speed,
+                                speed_mag,
                                 requested_rot,
                                 extra_rot,
                             )
@@ -465,13 +474,9 @@ class ArmController:
                                 "Moving joint %s by %.3f rotations at speed %d",
                                 joint,
                                 run_rot,
-                                speed,
+                                speed_mag,
                             )
-                        run_speed = speed
-                        if run_rot < 0:
-                            run_rot = -run_rot
-                            run_speed = -run_speed
-                        motor.run_for_rotations(run_rot, speed=run_speed, blocking=True)  # type: ignore[arg-type]
+                        motor.run_for_rotations(run_rot, speed=speed_mag, blocking=True)  # type: ignore[arg-type]
                         if deadline is not None and time.time() > deadline:
                             timeout_triggered = True
                             self._last_dir[joint] = direction
@@ -507,12 +512,11 @@ class ArmController:
                                 "Moving joint %s by %.2f degrees at speed %d (%d/%d)",
                                 joint,
                                 chunk,
-                                speed,
+                                speed_mag,
                                 idx,
                                 len(chunks),
                             )
-                            chunk_speed = speed if chunk >= 0 else -speed
-                            motor.run_for_degrees(abs(chunk), speed=chunk_speed, blocking=True)  # type: ignore[arg-type]
+                            motor.run_for_degrees(chunk, speed=speed_mag, blocking=True)  # type: ignore[arg-type]
                     self._last_dir[joint] = direction
 
                 self.stop_event.clear()
@@ -542,15 +546,14 @@ class ArmController:
                     local_deadband = 0.3 if joint == "D" else finalize_deadband_deg
                     if finalize and abs(error) > local_deadband:
                         correction = error
-                        corr_speed = max(1, int(abs(speed) * 0.8))
+                        corr_speed = max(1, int(abs(speed_mag) * 0.8))
                         logger.info(
                             "Finalizing joint %s with %.2f° correction at speed %d",
                             joint,
                             correction,
                             corr_speed,
                         )
-                        corr_run_speed = corr_speed if correction >= 0 else -corr_speed
-                        motor.run_for_degrees(abs(correction), speed=corr_run_speed, blocking=True)
+                        motor.run_for_degrees(correction, speed=corr_speed, blocking=True)
                         actual_after = read_position(motor)
                         if actual_after is not None:
                             actual = actual_after
