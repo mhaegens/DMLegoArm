@@ -6,11 +6,13 @@ Each entry maps an endpoint name to a callable that accepts the global
 
 from .pick_assembly_quality import run as pick_assembly_quality
 from .pick_quality_assembly import run as pick_quality_assembly
+from .shutdown import run as shutdown
 from .test import run as test
 
 PROCESS_MAP = {
     "pick-assembly-quality": pick_assembly_quality,
     "pick-quality-assembly": pick_quality_assembly,
+    "shutdown": shutdown,
     "test": test,
 }
 

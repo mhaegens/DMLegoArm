@@ -85,6 +85,7 @@
       console:<svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" d="M4 6h16v12H4z"/><path strokeWidth="2" d="M7 10l3 2-3 2M13 14h4"/></svg>,
       target:<svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="8" strokeWidth="2"/><circle cx="12" cy="12" r="2" strokeWidth="2"/></svg>,
       stop:<svg className={className} viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>,
+      power:<svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" d="M12 3v9"/><path strokeWidth="2" d="M7.5 5.3a7 7 0 108.9 0"/></svg>,
       dl:  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" d="M12 3v12m0 0l-4-4m4 4 4-4M4 21h16"/></svg>,
       tune:<svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" d="M4 6h10M14 6v10M4 18h16M8 18V8M18 6v8"/></svg>,
     }[name] || <span/>);
@@ -568,6 +569,21 @@
         await stop();
       }
 
+      async function handleShutdown(){
+        const confirmed = window.confirm(
+          "Move to shutdown pose (A open, B/C min, D neutral) and power off the Pi?\nThis will halt the Pi after the move."
+        );
+        if(!confirmed) return;
+        addLog({level:'req', text:'Shutdown requested'});
+        try{
+          await runProcess("shutdown");
+          setToast({text:"Shutdown sequence started: parking arm then powering off", ts:Date.now()});
+        }catch(e){
+          addLog({level:'err', text:'Shutdown failed', body:String(e)});
+          alert("Failed to start shutdown: "+(e?.message || e));
+        }
+      }
+
       // ---- CORE NU D GE: sends *rotations* when unit is 'rot' (no rotCal math) ----
       async function nudge(name, amount, speed, options={}){
         const unit = options.unit || nudgeUnit;
@@ -936,6 +952,9 @@
                   </Btn>
                   <Btn variant="ghost" size="md" onClick={()=>setCalibOpen(true)} aria-label="Open calibration">
                     <Icon name="tune" /><span className="ml-2">Calibrate</span>
+                  </Btn>
+                  <Btn variant="danger" size="md" onClick={handleShutdown} aria-label="Shutdown arm and Pi">
+                    <Icon name="power" /><span className="ml-2">Shutdown</span>
                   </Btn>
                   <Btn variant="ghost" size="md" onClick={()=>setAdminOpen(true)} aria-label="Open admin settings">
                     <Icon name="menu" /><span className="ml-2">Admin</span>

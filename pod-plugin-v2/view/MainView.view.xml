@@ -14,6 +14,7 @@
         <ToolbarSpacer/>
         <Button text="Health" type="Transparent" icon="sap-icon://sys-monitor" press=".onHealth"/>
         <Button text="Refresh State" type="Transparent" icon="sap-icon://refresh" press=".onRefreshState"/>
+        <Button text="Shutdown" type="Reject" icon="sap-icon://power" press=".onShutdown"/>
         <Button text="Settings" type="Transparent" icon="sap-icon://action-settings" press=".onOpenSettings"/>
       </Toolbar>
     </headerToolbar>
