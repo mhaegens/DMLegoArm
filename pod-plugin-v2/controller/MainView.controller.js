@@ -2,6 +2,7 @@ sap.ui.define([
   "sap/dm/dme/podfoundation/controller/PluginViewController",
   "sap/ui/model/json/JSONModel",
   "sap/m/MessageToast",
+  "sap/m/MessageBox",
   "sap/m/Dialog",
   "sap/m/Label",
   "sap/m/Input",
@@ -9,7 +10,7 @@ sap.ui.define([
   "sap/ui/core/Item",
   "sap/m/Button",
   "sap/m/TextArea"
-], function (PluginViewController, JSONModel, MessageToast, Dialog, Label, Input, Select, Item, Button, TextArea) {
+], function (PluginViewController, JSONModel, MessageToast, MessageBox, Dialog, Label, Input, Select, Item, Button, TextArea) {
   "use strict";
 
   var STORAGE_KEY = "lego.arm.cfg.v2";
@@ -288,6 +289,31 @@ sap.ui.define([
       } catch (e) {
         this._setStatus("state error - " + e.message, "Error");
       } finally { this._setBusy(false); }
+    },
+
+    onShutdown: function () {
+      var that = this;
+      MessageBox.warning(
+        "Move to the shutdown pose (A open, B/C min, D neutral) and power off the Pi?",
+        {
+          title: "Confirm shutdown",
+          actions: [MessageBox.Action.CANCEL, MessageBox.Action.OK],
+          emphasizedAction: MessageBox.Action.OK,
+          onClose: async function (action) {
+            if (action !== MessageBox.Action.OK) { return; }
+            that._setBusy(true); that._setStatus("starting shutdown", "Warning");
+            try {
+              var res = await that._fetchJson("/v1/processes/shutdown", { method: "POST", body: JSON.stringify({}) });
+              that._log("Shutdown sequence", res);
+              MessageToast.show("Shutdown sequence started");
+              that._setStatus("shutdown scheduled", "Success");
+            } catch (e) {
+              that._setStatus("shutdown error - " + e.message, "Error");
+              MessageToast.show("Shutdown failed: " + e.message);
+            } finally { that._setBusy(false); }
+          }
+        }
+      );
     },
 
     _updateStateModel: function (payload) {
