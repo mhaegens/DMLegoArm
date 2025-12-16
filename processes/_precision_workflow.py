@@ -1,9 +1,9 @@
 """Shared precision workflow logic for production processes.
 
-The production flows keep most joints fast while treating joint D (wrist
-rotation) slightly more cautiously. We still cap its top speed, but only
-to 80% of the standard rate so moves remain quick without the previous
-extreme slowdown.
+All joints now move at their requested speeds and rely on the controller to
+perform final corrections at 80% of that requested speed. The workflow still
+breaks long A/B/C moves into segments to reduce overshoot but no longer slows
+joint D differently from the others.
 """
 
 from __future__ import annotations
@@ -20,18 +20,12 @@ if not logging.getLogger().handlers:
     )
 
 # ================= Tunables =================
-# Speeds for the unchanged joints.  We still break long moves into two
-# phases (full speed then a slower final approach) because their gear
-# trains did not change.
-SPEED_ABC = 100
-SPEED_ABC_FINAL = 35
-SPEED_ABC_FINE = 25
+# Speeds for all joints. We still break long A/B/C moves into segments to help
+# reduce overshoot, but all joints otherwise use the same rates.
+SPEED_DEFAULT = 100
+SPEED_DEFAULT_FINAL = 35
+SPEED_FINE = 25
 SEGMENT_DEG_ABC = 120.0
-
-# Joint D: slightly slower (80% of the standard speeds).
-SPEED_D_MAX = 80
-SPEED_D_FINAL = 28
-SPEED_D_FINE = 20
 
 # Position tolerances (degrees).
 TOL = {"A": 3.0, "B": 3.0, "C": 3.0, "D": 1.0}
@@ -90,9 +84,6 @@ def _read_pos(arm, joint: str) -> float:
 def _abs_move(arm, joint: str, target: float, *, speed: int, use_segments: bool) -> Dict[str, Any]:
     """Absolute move with optional segmentation (used for joints A/B/C)."""
 
-    if joint == "D":
-        speed = min(speed, SPEED_D_MAX)
-
     if not use_segments:
         return arm.move("absolute", {joint: target}, speed=speed, units="degrees", finalize=True)
 
@@ -105,9 +96,9 @@ def _abs_move(arm, joint: str, target: float, *, speed: int, use_segments: bool)
         pos = current
         while abs(target - pos) > SEGMENT_DEG_ABC:
             pos += step
-            last = arm.move("absolute", {joint: pos}, speed=SPEED_ABC, units="degrees", finalize=True)
+            last = arm.move("absolute", {joint: pos}, speed=SPEED_DEFAULT, units="degrees", finalize=True)
 
-        last = arm.move("absolute", {joint: target}, speed=SPEED_ABC_FINAL, units="degrees", finalize=True)
+        last = arm.move("absolute", {joint: target}, speed=SPEED_DEFAULT_FINAL, units="degrees", finalize=True)
     else:
         last = arm.move("absolute", {joint: target}, speed=speed, units="degrees", finalize=True)
 
@@ -126,12 +117,11 @@ def _fine_correct(arm, joint: str, target: float) -> bool:
         gain = FINE_GAIN_D
         step_min = FINE_STEP_MIN_D
         step_max = FINE_STEP_MAX_D
-        speed = SPEED_D_FINE
     else:
         gain = FINE_GAIN_ABC
         step_min = FINE_STEP_MIN_ABC
         step_max = FINE_STEP_MAX_ABC
-        speed = SPEED_ABC_FINE
+    speed = SPEED_FINE
 
     for attempt in range(1, FINE_MAX_STEPS + 1):
         current = _read_pos(arm, joint)
@@ -158,7 +148,7 @@ def _fine_correct(arm, joint: str, target: float) -> bool:
         result = arm.move(
             "relative",
             {joint: correction},
-            speed=min(speed, SPEED_D_MAX) if joint == "D" else speed,
+            speed=speed,
             units="degrees",
             finalize=True,
         )
@@ -195,7 +185,7 @@ def _move_joint(arm, joint: str, target: float) -> Dict[str, Any]:
     """Move one joint with verification, retries, and fine correction."""
 
     use_segments = joint in ("A", "B", "C")
-    base_speed = SPEED_ABC if use_segments else SPEED_D_MAX
+    base_speed = SPEED_DEFAULT
     last: Dict[str, Any] = {}
     attempt = 0
     current_speed = base_speed
@@ -218,7 +208,7 @@ def _move_joint(arm, joint: str, target: float) -> Dict[str, Any]:
             return last
 
         if attempt <= RETRY_ON_FAIL:
-            current_speed = SPEED_ABC_FINAL if use_segments else SPEED_D_FINAL
+            current_speed = SPEED_DEFAULT_FINAL
             logger.warning("Retrying %s at slower speed=%d", joint, current_speed)
             continue
         break
@@ -283,12 +273,9 @@ def run_workflow(
 
 __all__ = [
     "run_workflow",
-    "SPEED_ABC",
-    "SPEED_ABC_FINAL",
-    "SPEED_ABC_FINE",
-    "SPEED_D_MAX",
-    "SPEED_D_FINAL",
-    "SPEED_D_FINE",
+    "SPEED_DEFAULT",
+    "SPEED_DEFAULT_FINAL",
+    "SPEED_FINE",
     "POSE_PAUSE_S",
     "JOINT_PAUSE_S",
 ]

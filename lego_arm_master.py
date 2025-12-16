@@ -542,7 +542,7 @@ class ArmController:
                     local_deadband = 0.3 if joint == "D" else finalize_deadband_deg
                     if finalize and abs(error) > local_deadband:
                         correction = error
-                        corr_speed = 2 if joint == "D" else max(20, speed // 2 if speed > 0 else 20)
+                        corr_speed = max(1, int(abs(speed) * 0.8))
                         logger.info(
                             "Finalizing joint %s with %.2f° correction at speed %d",
                             joint,
