@@ -81,6 +81,38 @@ def _read_pos(arm, joint: str) -> float:
         return float("nan")
 
 
+def _telemetry_unhealthy(arm, errs: Any) -> bool:
+    """Best-effort check for unhealthy telemetry sources."""
+
+    # Missing/NaN errors usually mean we could not read positions.
+    if not isinstance(errs, dict) or any(v != v for v in errs.values()):
+        return True
+
+    # Allow arm implementations to expose a health probe.
+    for attr in ("telemetry_healthy", "telemetry_ok", "telemetry_status"):
+        probe = getattr(arm, attr, None)
+        try:
+            if callable(probe):
+                result = probe()
+            else:
+                result = probe
+        except Exception:  # pragma: no cover - defensive
+            continue
+
+        if result is None:
+            continue
+
+        if isinstance(result, dict):
+            healthy = bool(result.get("healthy", result.get("ok", True)))
+        else:
+            healthy = bool(result)
+
+        if not healthy:
+            return True
+
+    return False
+
+
 def _abs_move(arm, joint: str, target: float, *, speed: int, use_segments: bool) -> Dict[str, Any]:
     """Absolute move with optional segmentation (used for joints A/B/C)."""
 
@@ -149,8 +181,10 @@ def _move_joint(arm, joint: str, target: float) -> Dict[str, Any]:
     last: Dict[str, Any] = {}
     err_abs = float("nan")
 
-    max_attempts = 1 + RETRY_ON_FAIL
-    for attempt in range(1, max_attempts + 1):
+    attempt = 1
+    telemetry_retry_used = False
+
+    while True:
         current_speed = base_speed if attempt == 1 else SPEED_DEFAULT_FINAL
         logger.info(
             ">>> Move %s to %.2f° (attempt %d) @%d",
@@ -164,17 +198,44 @@ def _move_joint(arm, joint: str, target: float) -> Dict[str, Any]:
         ok, errs = _verify_stable(arm, {joint: target}, timeout_s=SETTLE_TIMEOUT_S)
         err_abs = float(abs(errs.get(joint, 0.0))) if isinstance(errs, dict) and joint in errs else float("nan")
         logger.info("... %s settle: ok=%s err≈%.2f°", joint, ok, err_abs if err_abs == err_abs else float("nan"))
+
         if ok:
             return last
 
-        if attempt < max_attempts:
-            logger.warning("Retrying %s at slower speed=%d", joint, SPEED_DEFAULT_FINAL)
+        if _telemetry_unhealthy(arm, errs) and not telemetry_retry_used:
+            telemetry_retry_used = True
+            logger.warning("Telemetry unhealthy; retrying %s once", joint)
+            attempt += 1
             continue
 
-        # Final allowed attempt: a single fine correction at fine speed.
-        good = _single_fine_correct(arm, joint, target)
-        if good:
+        if err_abs != err_abs:  # NaN guard
+            err_abs = float("inf")
+
+        tol = TOL.get(joint, 3.0)
+        if err_abs <= tol:
             return last
+
+        if err_abs <= 10.0:
+            if attempt >= 2:
+                return last
+            logger.warning("Retrying %s at slower speed=%d", joint, SPEED_DEFAULT_FINAL)
+            attempt += 1
+            continue
+
+        # Recovery class: |error| > 10°
+        if attempt == 1:
+            logger.warning("Large error for %s (≈%.2f°). Performing recovery at speed=%d", joint, err_abs, SPEED_DEFAULT_FINAL)
+            attempt += 1
+            continue
+        if attempt == 2:
+            logger.warning("Second recovery attempt for %s at speed=%d", joint, SPEED_DEFAULT_FINAL)
+            attempt += 1
+            continue
+
+        if err_abs > 10.0:
+            raise RuntimeError(
+                f"Joint {joint} failed to settle at {target:.2f}° after {attempt} attempt(s)"
+            )
 
         if joint in IGNORE_SETTLE_FAILURE:
             logger.warning(
@@ -183,8 +244,9 @@ def _move_joint(arm, joint: str, target: float) -> Dict[str, Any]:
                 err_abs if err_abs == err_abs else float("nan"),
             )
             return last
+
         raise RuntimeError(
-            f"Joint {joint} failed to settle at {target:.2f}° after {max_attempts} attempt(s)"
+            f"Joint {joint} failed to settle at {target:.2f}° after {attempt} attempt(s)"
         )
 
     return last

@@ -8,6 +8,7 @@ class DummyArm:
     def __init__(self):
         self.positions = {"C": 0.0, "D": 0.0}
         self.moves = []
+        self.telemetry_ok_flag = True
 
     def move(self, mode, values, speed, units, finalize):
         # Simulate a stubborn joint that reports no position change.
@@ -16,6 +17,9 @@ class DummyArm:
 
     def read_position(self):
         return dict(self.positions)
+
+    def telemetry_healthy(self):
+        return self.telemetry_ok_flag
 
 
 class PrecisionWorkflowTests(unittest.TestCase):
@@ -43,6 +47,64 @@ class PrecisionWorkflowTests(unittest.TestCase):
 
         self.assertIsInstance(result, dict)
         self.assertGreaterEqual(len(arm.moves), 2)
+
+    @mock.patch.object(pw, "_verify_stable", return_value=(False, {"D": 2.5}))
+    def test_small_error_accepts_without_retry(self, _mock_verify):
+        arm = DummyArm()
+
+        pw._move_joint(arm, "D", 5.0)
+
+        self.assertEqual(len(arm.moves), 1)
+
+    def test_medium_error_retries_once_then_accepts(self):
+        verify_results = [
+            (False, {"D": 8.0}),
+            (False, {"D": 6.0}),
+        ]
+
+        def fake_verify(*_args, **_kwargs):
+            return verify_results.pop(0)
+
+        with mock.patch.object(pw, "_verify_stable", side_effect=fake_verify):
+            arm = DummyArm()
+            pw._move_joint(arm, "D", 5.0)
+
+        self.assertEqual(len(arm.moves), 2)
+        self.assertEqual(arm.moves[1][2], pw.SPEED_DEFAULT_FINAL)
+
+    def test_large_error_limits_recovery_attempts(self):
+        verify_results = [
+            (False, {"D": 25.0}),
+            (False, {"D": 22.0}),
+            (False, {"D": 18.0}),
+        ]
+
+        def fake_verify(*_args, **_kwargs):
+            return verify_results.pop(0)
+
+        arm = DummyArm()
+        with mock.patch.object(pw, "_verify_stable", side_effect=fake_verify):
+            with self.assertRaises(RuntimeError):
+                pw._move_joint(arm, "D", 5.0)
+
+        self.assertEqual(len(arm.moves), 3)
+
+    def test_telemetry_unhealthy_allows_one_extra_try(self):
+        verify_results = [
+            (False, {"D": float("nan")}),
+            (True, {"D": 0.0}),
+        ]
+
+        def fake_verify(*_args, **_kwargs):
+            return verify_results.pop(0)
+
+        arm = DummyArm()
+        arm.telemetry_ok_flag = False
+
+        with mock.patch.object(pw, "_verify_stable", side_effect=fake_verify):
+            pw._move_joint(arm, "D", 5.0)
+
+        self.assertEqual(len(arm.moves), 2)
 
 
 if __name__ == "__main__":  # pragma: no cover
