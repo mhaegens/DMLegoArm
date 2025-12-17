@@ -28,7 +28,7 @@ SPEED_FINE = 25
 SEGMENT_DEG_ABC = 120.0
 
 # Position tolerances (degrees).
-TOL = {"A": 3.0, "B": 3.0, "C": 3.0, "D": 1.0}
+TOL = {"A": 3.0, "B": 3.0, "C": 3.0, "D": 3.0}
 
 # Verification parameters.
 SETTLE_TIMEOUT_S = 6.0
@@ -37,15 +37,14 @@ STABLE_OK_POLLS = 2
 STABLE_WINDOW_S = 0.5
 
 # Fine-tuning parameters.
-RETRY_ON_FAIL = 1
+# Allow a maximum of three immediate retries per joint. The final attempt is a
+# single fine correction rather than a loop of nudges, so each joint performs
+# at most ``RETRY_ON_FAIL`` follow-up moves after the initial command.
+RETRY_ON_FAIL = 3
 REPEAT_PER_JOINT = 2
-FINE_MAX_STEPS = 5
-FINE_GAIN_ABC = 0.65
-FINE_STEP_MIN_ABC = 0.8
-FINE_STEP_MAX_ABC = 20.0
-FINE_GAIN_D = 0.70
-FINE_STEP_MIN_D = 1.2
-FINE_STEP_MAX_D = 8.0
+FINE_GAIN = 0.65
+FINE_STEP_MIN = 0.8
+FINE_STEP_MAX = 20.0
 
 # Cosmetic pauses so operators can observe each move.
 POSE_PAUSE_S = 1.0
@@ -106,94 +105,53 @@ def _abs_move(arm, joint: str, target: float, *, speed: int, use_segments: bool)
     return last
 
 
-def _fine_correct(arm, joint: str, target: float) -> bool:
-    """Perform small relative nudges toward ``target``."""
+def _single_fine_correct(arm, joint: str, target: float) -> bool:
+    """Perform a single small relative nudge toward ``target``."""
 
     tol = TOL.get(joint, 3.0)
     ok, _ = _verify_stable(arm, {joint: target}, timeout_s=0.8)
     if ok:
         return True
 
-    if joint == "D":
-        gain = FINE_GAIN_D
-        step_min = FINE_STEP_MIN_D
-        step_max = FINE_STEP_MAX_D
-    else:
-        gain = FINE_GAIN_ABC
-        step_min = FINE_STEP_MIN_ABC
-        step_max = FINE_STEP_MAX_ABC
+    current = _read_pos(arm, joint)
+    gain = FINE_GAIN
+    step_min = FINE_STEP_MIN
+    step_max = FINE_STEP_MAX
     speed = SPEED_FINE
 
-    for attempt in range(1, FINE_MAX_STEPS + 1):
-        current = _read_pos(arm, joint)
-        if current == current:
-            error = target - current
-            if abs(error) <= tol:
-                return True
-            step = max(step_min, min(step_max, abs(error) * gain))
-            correction = step if error > 0 else -step
-            if joint == "D" and 0 < abs(error) < 1.0:
-                correction = 1.0 if error > 0 else -1.0
-        else:
-            correction = step_min
-
-        logger.warning(
-            "%s fine %d/%d: %+0.2f° @%d",
-            joint,
-            attempt,
-            FINE_MAX_STEPS,
-            correction,
-            speed,
-        )
-        pre_pos = current if current == current else float("nan")
-        result = arm.move(
-            "relative",
-            {joint: correction},
-            speed=speed,
-            units="degrees",
-            finalize=True,
-        )
-
-        if joint == "D":
-            post_pos = float("nan")
-            if isinstance(result, dict):
-                new_abs = result.get("new_abs")
-                if isinstance(new_abs, dict):
-                    try:
-                        value = new_abs.get(joint)
-                        if value is not None:
-                            post_pos = float(value)
-                    except (TypeError, ValueError):
-                        post_pos = float("nan")
-            if post_pos != post_pos:
-                post_pos = _read_pos(arm, joint)
-            delta = post_pos - pre_pos if pre_pos == pre_pos and post_pos == post_pos else float("nan")
-            logger.info(
-                "D nudge telemetry: pre=%.2f post=%.2f delta=%.2f",
-                pre_pos,
-                post_pos,
-                delta,
-            )
-
-        ok, _ = _verify_stable(arm, {joint: target}, timeout_s=1.0 if joint == "D" else 0.8)
-        if ok:
+    if current == current:
+        error = target - current
+        if abs(error) <= tol:
             return True
+        step = max(step_min, min(step_max, abs(error) * gain))
+        correction = step if error > 0 else -step
+    else:
+        correction = step_min
 
-    return False
+    logger.warning("%s fine 1/1: %+0.2f° @%d", joint, correction, speed)
+    arm.move(
+        "relative",
+        {joint: correction},
+        speed=speed,
+        units="degrees",
+        finalize=True,
+    )
+
+    ok, _ = _verify_stable(arm, {joint: target}, timeout_s=0.8)
+    return ok
 
 
 def _move_joint(arm, joint: str, target: float) -> Dict[str, Any]:
-    """Move one joint with verification, retries, and fine correction."""
+    """Move one joint with verification, retries, and a single fine correction."""
 
     use_segments = joint in ("A", "B", "C")
     base_speed = SPEED_DEFAULT
     last: Dict[str, Any] = {}
-    attempt = 0
-    current_speed = base_speed
     err_abs = float("nan")
 
-    while True:
-        attempt += 1
+    max_attempts = 1 + RETRY_ON_FAIL
+    for attempt in range(1, max_attempts + 1):
+        current_speed = base_speed if attempt == 1 else SPEED_DEFAULT_FINAL
         logger.info(
             ">>> Move %s to %.2f° (attempt %d) @%d",
             joint,
@@ -209,14 +167,15 @@ def _move_joint(arm, joint: str, target: float) -> Dict[str, Any]:
         if ok:
             return last
 
-        if attempt <= RETRY_ON_FAIL:
-            current_speed = SPEED_DEFAULT_FINAL
-            logger.warning("Retrying %s at slower speed=%d", joint, current_speed)
+        if attempt < max_attempts:
+            logger.warning("Retrying %s at slower speed=%d", joint, SPEED_DEFAULT_FINAL)
             continue
-        break
 
-    good = _fine_correct(arm, joint, target)
-    if not good:
+        # Final allowed attempt: a single fine correction at fine speed.
+        good = _single_fine_correct(arm, joint, target)
+        if good:
+            return last
+
         if joint in IGNORE_SETTLE_FAILURE:
             logger.warning(
                 "Joint %s failed to settle (last error≈%.2f°); ignoring failure per operator guidance.",
@@ -225,8 +184,9 @@ def _move_joint(arm, joint: str, target: float) -> Dict[str, Any]:
             )
             return last
         raise RuntimeError(
-            f"Joint {joint} failed to settle at {target:.2f}° after {attempt} absolute attempt(s) + fine correction"
+            f"Joint {joint} failed to settle at {target:.2f}° after {max_attempts} attempt(s)"
         )
+
     return last
 
 def run_workflow(
