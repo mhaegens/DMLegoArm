@@ -47,7 +47,7 @@ FINE_STEP_MIN = 0.8
 FINE_STEP_MAX = 20.0
 
 # Cosmetic pauses so operators can observe each move.
-POSE_PAUSE_S = 1.0
+POSE_PAUSE_S = 0.0
 JOINT_PAUSE_S = 0.0
 IGNORE_SETTLE_FAILURE = {"A", "B","C", "D"}
 # ===========================================
