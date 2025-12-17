@@ -268,6 +268,8 @@ def run_workflow(
     result: Dict[str, Any] = {}
     previous_pose: Dict[str, float] | None = None
 
+    total_steps = len(resolved_steps)
+
     for index, (pose_name, target_pose) in enumerate(resolved_steps, start=1):
         logger.info("=== Pose %d/%d: %s ===", index, len(resolved_steps), pose_name)
 
@@ -282,6 +284,16 @@ def run_workflow(
             if joint not in target_pose:
                 continue
             target = float(target_pose[joint])
+
+            if (
+                previous_pose is not None
+                and index != 1
+                and index != total_steps
+                and joint in previous_pose
+                and float(previous_pose[joint]) == target
+            ):
+                logger.info("Skipping %s for pose %d; unchanged from previous pose", joint, index)
+                continue
 
             for rep in range(1, REPEAT_PER_JOINT + 1):
                 logger.info("-- %s → %.2f° (pass %d/%d)", joint, target, rep, REPEAT_PER_JOINT)
