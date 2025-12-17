@@ -462,7 +462,7 @@ sap.ui.define([
       this._setBusy(true); this._setStatus("loading processes");
       try {
         var inv = await this._fetchJson("/v1/inventory");
-        var list = (inv && inv.processes) || [];
+        var list = (inv && inv.data && inv.data.processes) || (inv && inv.processes) || [];
         this.getView().getModel("view").setProperty("/processes", list);
         this._log("Processes", list);
         this._setStatus("processes loaded", "Success");
