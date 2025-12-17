@@ -106,6 +106,37 @@ class PrecisionWorkflowTests(unittest.TestCase):
 
         self.assertEqual(len(arm.moves), 2)
 
+    @mock.patch.object(pw, "_verify_stable", return_value=(True, {}))
+    def test_run_workflow_skips_unchanged_joints_except_edges(self, _mock_verify):
+        arm = mock.Mock()
+        arm.resolve_pose.side_effect = lambda pose: pose
+
+        steps = [
+            ("First", {"A": 1.0, "B": 2.0}),
+            ("Second", {"A": 1.0, "B": 3.0}),
+            ("Third", {"A": 1.0, "B": 3.0}),
+            ("Final", {"A": 1.0, "B": 3.0}),
+        ]
+
+        with mock.patch.object(pw, "_move_joint", return_value={}) as mock_move:
+            pw.run_workflow(arm, steps, joint_order=("B", "A"))
+
+        self.assertEqual(
+            mock_move.call_args_list,
+            [
+                mock.call(arm, "B", 2.0),
+                mock.call(arm, "B", 2.0),
+                mock.call(arm, "A", 1.0),
+                mock.call(arm, "A", 1.0),
+                mock.call(arm, "B", 3.0),
+                mock.call(arm, "B", 3.0),
+                mock.call(arm, "B", 3.0),
+                mock.call(arm, "B", 3.0),
+                mock.call(arm, "A", 1.0),
+                mock.call(arm, "A", 1.0),
+            ],
+        )
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
