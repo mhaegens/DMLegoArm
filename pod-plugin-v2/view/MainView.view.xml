@@ -4,6 +4,7 @@
   xmlns="sap.m"
   xmlns:l="sap.ui.layout"
   xmlns:form="sap.ui.layout.form"
+  xmlns:core="sap.ui.core"
   controllerName="sap.michielh.legoarm.controller.MainView"
   width="100%" height="100%">
 
@@ -127,12 +128,41 @@
                 <Button text="Pick Quality" icon="sap-icon://quality-issue" press=".onPosePickQuality" width="100%"/>
               </l:content>
               <l:content>
-                <Button text="Neutral" icon="sap-icon://reset" press=".onPoseNeutral" width="100%"/>
+                <Button text="Neutral" icon="sap-icon://reset" press=".onPoseNeutral" tooltip="A: Open, B/C: Pick, D: Neutral" width="100%"/>
               </l:content>
               <l:content>
                 <Button text="Flex" icon="sap-icon://trend-down" press=".onPoseFlex" tooltip="A: Open, B/C: Max, D: Neutral" width="100%"/>
               </l:content>
             </l:Grid>
+          </content>
+        </Panel>
+
+        <Panel headerText="Production processes" class="sapUiSmallMarginTop">
+          <headerToolbar>
+            <Toolbar>
+              <Title text="Production processes"/>
+              <ToolbarSpacer/>
+              <Button text="Refresh" type="Transparent" icon="sap-icon://refresh" press=".onRefreshProcesses"/>
+            </Toolbar>
+          </headerToolbar>
+          <content>
+            <VBox class="sapUiSmallMargin">
+              <Text text="No processes available." visible="{= ${view>/processes}.length === 0 }"/>
+              <List items="{view>/processes}" visible="{= ${view>/processes}.length > 0 }">
+                <items>
+                  <CustomListItem>
+                    <HBox justifyContent="SpaceBetween" alignItems="Center" width="100%">
+                      <Text text="{view>}"/>
+                      <Button text="Run" type="Emphasized" press=".onRunProcess">
+                        <customData>
+                          <core:CustomData key="name" value="{view>}"/>
+                        </customData>
+                      </Button>
+                    </HBox>
+                  </CustomListItem>
+                </items>
+              </List>
+            </VBox>
           </content>
         </Panel>
 

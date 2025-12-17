@@ -35,13 +35,15 @@ sap.ui.define([
         positions: [],
         poseSummary: "No data yet",
         busy: false,
-        points: {}
+        points: {},
+        processes: []
       });
       this.getView().setModel(vm, "view");
 
       this._log("Plugin v2 loaded", this._cfg);
       this.onRefreshState();
       this.onHealth();
+      this.onRefreshProcesses();
     },
 
     /* ======================
@@ -316,6 +318,24 @@ sap.ui.define([
       );
     },
 
+    onRunProcess: async function (oEvent) {
+      var name = oEvent && oEvent.getSource && oEvent.getSource().data("name");
+      if (!name) { return; }
+
+      this._setBusy(true); this._setStatus("starting process '" + name + "'");
+      try {
+        var res = await this._fetchJson("/v1/processes/" + name, { method: "POST", body: JSON.stringify({}) });
+        this._log("Process started", res);
+        MessageToast.show("Process '" + name + "' started");
+        this._setStatus("process started", "Success");
+      } catch (e) {
+        this._setStatus("process error - " + e.message, "Error");
+        MessageToast.show("Failed to start process '" + name + "': " + e.message);
+      } finally {
+        this._setBusy(false);
+      }
+    },
+
     _updateStateModel: function (payload) {
       var data = payload && payload.data ? payload.data : payload || {};
       var abs = data.abs_degrees || {};
@@ -438,6 +458,22 @@ sap.ui.define([
       }
     },
 
+    onRefreshProcesses: async function () {
+      this._setBusy(true); this._setStatus("loading processes");
+      try {
+        var inv = await this._fetchJson("/v1/inventory");
+        var list = (inv && inv.data && inv.data.processes) || (inv && inv.processes) || [];
+        this.getView().getModel("view").setProperty("/processes", list);
+        this._log("Processes", list);
+        this._setStatus("processes loaded", "Success");
+      } catch (e) {
+        this._setStatus("processes error - " + e.message, "Error");
+        MessageToast.show("Failed to load processes: " + e.message);
+      } finally {
+        this._setBusy(false);
+      }
+    },
+
     /* ======================
        Joint preset handlers
        ====================== */
@@ -463,7 +499,7 @@ sap.ui.define([
       this._poseFromPoints({ A: "open", B: "pick", C: "pick", D: "quality" });
     },
     onPoseNeutral: function () {
-      this._poseFromPoints({ A: "closed", B: "neutral", C: "neutral", D: "neutral" });
+      this._poseFromPoints({ A: "open", B: "pick", C: "pick", D: "neutral" });
     },
     onPoseFlex: function () {
       this._poseFromPoints({ A: "open", B: "max", C: "max", D: "neutral" });
