@@ -11,7 +11,6 @@ Runs a local Tkinter UI on the Raspberry Pi screen with:
 from __future__ import annotations
 
 import json
-import os
 import socket
 import subprocess
 import threading
@@ -323,12 +322,5 @@ class PiControlApp(tk.Tk):
 
 
 if __name__ == "__main__":
-    if not os.environ.get("DISPLAY"):
-        raise SystemExit(
-            "Display not found. This UI requires a local graphical session.\n"
-            "Try running from the Pi desktop, or set DISPLAY (e.g. export DISPLAY=:0).\n"
-            "If you are using SSH, enable X11 forwarding with `ssh -X` and ensure "
-            "python3-tk is installed."
-        )
     app = PiControlApp()
     app.mainloop()
