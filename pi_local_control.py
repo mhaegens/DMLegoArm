@@ -502,27 +502,6 @@ class PiControlApp(tk.Tk):
 
         threading.Thread(target=task, daemon=True).start()
 
-    def _restart_legoarm_service(self) -> None:
-        def task() -> None:
-            try:
-                result = subprocess.run(
-                    ["sudo", "-n", "systemctl", "restart", "legoarm"],
-                    check=False,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                )
-                if result.returncode == 0:
-                    message = "legoarm service restart requested ✓"
-                else:
-                    stderr = result.stderr.strip() or "Unknown error"
-                    message = f"legoarm restart failed: {stderr}"
-                self.after(0, lambda: self._log(message))
-            except Exception as exc:
-                self.after(0, lambda: self._log(f"legoarm restart error: {exc}"))
-
-        threading.Thread(target=task, daemon=True).start()
-
     def _bind_settings_traces(self) -> None:
         def schedule_refresh(*_: object) -> None:
             self.after(200, self._update_status)
@@ -590,19 +569,9 @@ class PiControlApp(tk.Tk):
 
 
 def _parse_args() -> argparse.Namespace:
-    env_base_url = os.getenv("LEGO_ARM_BASE_URL", "").strip()
-    env_api_key = os.getenv("LEGO_ARM_API_KEY", "").strip()
     parser = argparse.ArgumentParser(description="LEGO Arm local control UI")
-    parser.add_argument(
-        "--base-url",
-        default=env_base_url or DEFAULT_BASE_URL,
-        help="Arm API base URL",
-    )
-    parser.add_argument(
-        "--api-key",
-        default=env_api_key,
-        help="API key for the Arm API",
-    )
+    parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="Arm API base URL")
+    parser.add_argument("--api-key", default="", help="API key for the Arm API")
     return parser.parse_args()
 
 
