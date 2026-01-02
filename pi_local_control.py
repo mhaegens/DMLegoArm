@@ -19,9 +19,16 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable, Dict, List, Optional, Tuple
 from urllib.error import URLError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
+LOCAL_BASE_URLS = (
+    "http://127.0.0.1:8000",
+    "http://localhost:8000",
+    "http://127.0.0.1:5001",
+    "http://localhost:5001",
+)
 STATUS_INTERVAL_MS = 3000
 REQUEST_TIMEOUT_S = 2.5
 
@@ -109,6 +116,37 @@ def _check_api(base_url: str, headers: dict) -> bool:
         return False
 
 
+def _is_local_url(base_url: str) -> bool:
+    try:
+        parsed = urlparse(base_url)
+        host = parsed.hostname or ""
+    except ValueError:
+        return False
+    return host in {"127.0.0.1", "localhost", "::1"}
+
+
+def _candidate_base_urls(base_url: str) -> List[str]:
+    if base_url:
+        candidates = [base_url]
+        if _is_local_url(base_url):
+            candidates.extend([url for url in LOCAL_BASE_URLS if url != base_url])
+        return candidates
+    return list(LOCAL_BASE_URLS)
+
+
+def _port_open(base_url: str) -> bool:
+    try:
+        parsed = urlparse(base_url)
+        host = parsed.hostname
+        port = parsed.port
+        if not host or not port:
+            return False
+        with socket.create_connection((host, port), timeout=0.6):
+            return True
+    except OSError:
+        return False
+
+
 class StatusIndicator(ttk.Frame):
     def __init__(self, master: tk.Misc, label: str) -> None:
         super().__init__(master)
@@ -140,6 +178,7 @@ class PiControlApp(tk.Tk):
         self.nudge_speed_var = tk.StringVar(value="40")
         self.status_text_var = tk.StringVar(value="Ready")
         self.processes: List[str] = []
+        self._last_working_base_url = DEFAULT_BASE_URL
 
         self._build_ui()
         self._schedule_status_check()
@@ -299,30 +338,66 @@ class PiControlApp(tk.Tk):
     def _send_command(self, label: str, path: str, payload: dict) -> None:
         base_url = self.base_url_var.get().strip().rstrip("/")
         headers = self._headers()
+        candidates = _candidate_base_urls(base_url)
+        if not base_url:
+            candidates = [url for url in candidates if _port_open(url)] or candidates
         try:
-            res = _json_request("POST", f"{base_url}{path}", payload, headers=headers)
-            if not res.get("ok", True):
-                err = res.get("error", {}).get("message") or res
-                self._log(f"{label} failed: {err}")
-            else:
-                self._log(f"{label} ✓")
+            last_error = None
+            for candidate in candidates:
+                try:
+                    res = _json_request("POST", f"{candidate}{path}", payload, headers=headers)
+                    self._last_working_base_url = candidate
+                    if (not base_url) or (_is_local_url(base_url) and candidate != base_url):
+                        self.base_url_var.set(candidate)
+                    if not res.get("ok", True):
+                        err = res.get("error", {}).get("message") or res
+                        self._log(f"{label} failed: {err}")
+                    else:
+                        self._log(f"{label} ✓")
+                    return
+                except URLError as exc:
+                    last_error = exc
+                    if base_url and not _is_local_url(base_url):
+                        raise
+            raise last_error or URLError("Connection refused")
         except URLError as exc:
-            self._log(f"{label} failed: {exc}")
+            if base_url:
+                self._log(f"{label} failed: {exc}")
+            else:
+                self._log(
+                    f"{label} failed: {exc}. Local API not responding on "
+                    f"{', '.join(LOCAL_BASE_URLS)}"
+                )
         except Exception as exc:
             self._log(f"{label} error: {exc}")
 
     def _refresh_processes(self) -> None:
         base_url = self.base_url_var.get().strip().rstrip("/")
         headers = self._headers()
+        candidates = _candidate_base_urls(base_url)
+        if not base_url:
+            candidates = [url for url in candidates if _port_open(url)] or candidates
 
         def task() -> None:
             try:
-                res = _json_request("GET", f"{base_url}/v1/inventory", headers=headers)
-                data = res.get("data", res)
-                processes = data.get("processes", []) if isinstance(data, dict) else []
-                self.processes = list(processes)
-                self.after(0, self._render_processes)
-                self._log("Processes refreshed")
+                last_error = None
+                for candidate in candidates:
+                    try:
+                        res = _json_request("GET", f"{candidate}/v1/inventory", headers=headers)
+                        data = res.get("data", res)
+                        processes = data.get("processes", []) if isinstance(data, dict) else []
+                        self.processes = list(processes)
+                        self._last_working_base_url = candidate
+                        if (not base_url) or (_is_local_url(base_url) and candidate != base_url):
+                            self.base_url_var.set(candidate)
+                        self.after(0, self._render_processes)
+                        self._log("Processes refreshed")
+                        return
+                    except URLError as exc:
+                        last_error = exc
+                        if base_url and not _is_local_url(base_url):
+                            raise
+                raise last_error or URLError("Connection refused")
             except Exception as exc:
                 self._log(f"Process refresh failed: {exc}")
 
@@ -361,13 +436,27 @@ class PiControlApp(tk.Tk):
     def _update_status(self) -> None:
         base_url = self.base_url_var.get().strip().rstrip("/")
         headers = self._headers()
+        candidates = _candidate_base_urls(base_url)
+        if not base_url:
+            candidates = [url for url in candidates if _port_open(url)] or candidates
 
         def task() -> Tuple[bool, bool, bool, bool]:
+            api_ok = False
+            chosen = base_url
+            for candidate in candidates:
+                if _check_api(candidate, headers):
+                    api_ok = True
+                    chosen = candidate
+                    break
+            if api_ok:
+                self._last_working_base_url = chosen or self._last_working_base_url
+                if (not base_url) or (_is_local_url(base_url) and chosen != base_url):
+                    self.after(0, lambda: self.base_url_var.set(chosen))
             return (
                 _check_internet(),
                 _check_ngrok(),
                 _check_pi_connect(),
-                _check_api(base_url, headers),
+                api_ok,
             )
 
         def apply(result: Tuple[bool, bool, bool, bool]) -> None:
