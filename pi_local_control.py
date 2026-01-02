@@ -568,6 +568,25 @@ class PiControlApp(tk.Tk):
 
         threading.Thread(target=runner, daemon=True).start()
 
+    def _restart_legoarm_service(self) -> None:
+        def task() -> None:
+            commands = (["systemctl", "restart", "legoarm"], ["systemctl", "--user", "restart", "legoarm"])
+            for command in commands:
+                result = subprocess.run(
+                    command,
+                    check=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                if result.returncode == 0:
+                    self.after(0, lambda: self._log("Restarted legoarm service ✓"))
+                    return
+            error = result.stderr.strip() or result.stdout.strip() or "Unknown error"
+            self.after(0, lambda: self._log(f"Restart legoarm failed: {error}"))
+
+        threading.Thread(target=task, daemon=True).start()
+
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="LEGO Arm local control UI")
