@@ -10,6 +10,7 @@ Runs a local Tkinter UI on the Raspberry Pi screen with:
 
 from __future__ import annotations
 
+import argparse
 import json
 import socket
 import subprocess
@@ -167,7 +168,7 @@ class StatusIndicator(ttk.Frame):
 
 
 class PiControlApp(tk.Tk):
-    def __init__(self) -> None:
+    def __init__(self, base_url: str = DEFAULT_BASE_URL, api_key: str = "") -> None:
         super().__init__()
         self.title("LEGO Arm - Local Control")
         screen_w = self.winfo_screenwidth()
@@ -178,8 +179,8 @@ class PiControlApp(tk.Tk):
         self.geometry(f"{width}x{height}")
         self.resizable(False, False)
 
-        self.base_url_var = tk.StringVar(value=DEFAULT_BASE_URL)
-        self.api_key_var = tk.StringVar(value="")
+        self.base_url_var = tk.StringVar(value=base_url or DEFAULT_BASE_URL)
+        self.api_key_var = tk.StringVar(value=api_key)
         self.nudge_amount_var = tk.StringVar(value="1")
         self.nudge_speed_var = tk.StringVar(value="40")
         self.status_text_var = tk.StringVar(value="Ready")
@@ -479,6 +480,14 @@ class PiControlApp(tk.Tk):
         threading.Thread(target=runner, daemon=True).start()
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="LEGO Arm local control UI")
+    parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="Arm API base URL")
+    parser.add_argument("--api-key", default="", help="API key for the Arm API")
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    app = PiControlApp()
+    args = _parse_args()
+    app = PiControlApp(base_url=args.base_url, api_key=args.api_key)
     app.mainloop()
