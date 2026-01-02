@@ -15,6 +15,7 @@ import json
 import os
 import socket
 import subprocess
+import sys
 import threading
 import time
 import tkinter as tk
@@ -575,7 +576,21 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _ensure_display() -> None:
+    if os.name == "nt":
+        return
+    if os.environ.get("DISPLAY"):
+        return
+    print(
+        "Tkinter UI requires a graphical display. Set $DISPLAY or run with a "
+        "desktop session (e.g., via the Pi's local screen or a VNC session).",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+
 if __name__ == "__main__":
     args = _parse_args()
+    _ensure_display()
     app = PiControlApp(base_url=args.base_url, api_key=args.api_key)
     app.mainloop()
