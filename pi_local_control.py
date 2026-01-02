@@ -23,7 +23,7 @@ from urllib.request import Request, urlopen
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 STATUS_INTERVAL_MS = 3000
-REQUEST_TIMEOUT_S = 1.5
+REQUEST_TIMEOUT_S = 2.5
 
 JOINTS = ["A", "B", "C", "D"]
 CALIB_POINTS = {
@@ -65,9 +65,13 @@ def _check_ngrok() -> bool:
         return False
 
 
-def _check_service_active(name: str) -> bool:
+def _check_service_active(name: str, user: bool = False) -> bool:
+    command = ["systemctl"]
+    if user:
+        command.append("--user")
+    command.extend(["is-active", name])
     result = subprocess.run(
-        ["systemctl", "is-active", name],
+        command,
         check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -77,13 +81,27 @@ def _check_service_active(name: str) -> bool:
 
 
 def _check_pi_connect() -> bool:
-    for service in ("rpi-connect", "rpi-connect-lite", "raspberrypi-connect"):
-        if _check_service_active(service):
+    services = ("rpi-connect", "rpi-connect-lite", "raspberrypi-connect")
+    for service in services:
+        if _check_service_active(service) or _check_service_active(service, user=True):
             return True
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", "rpi-connect|raspberrypi-connect"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if result.returncode == 0:
+            return True
+    except Exception:
+        return False
     return False
 
 
 def _check_api(base_url: str, headers: dict) -> bool:
+    if not base_url:
+        return False
     try:
         _json_request("GET", f"{base_url}/v1/health", headers=headers)
         return True
@@ -108,7 +126,12 @@ class PiControlApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("LEGO Arm - Local Control")
-        self.geometry("1024x600")
+        screen_w = self.winfo_screenwidth()
+        screen_h = self.winfo_screenheight()
+        self.compact_layout = screen_w <= 1024 or screen_h <= 600
+        width = screen_w if self.compact_layout else min(1024, screen_w)
+        height = screen_h if self.compact_layout else min(600, screen_h)
+        self.geometry(f"{width}x{height}")
         self.resizable(False, False)
 
         self.base_url_var = tk.StringVar(value=DEFAULT_BASE_URL)
@@ -121,6 +144,7 @@ class PiControlApp(tk.Tk):
         self._build_ui()
         self._schedule_status_check()
         self._refresh_processes()
+        self._bind_settings_traces()
 
     def _headers(self) -> dict:
         headers = {}
@@ -138,17 +162,26 @@ class PiControlApp(tk.Tk):
         self.status_text_var.set(message)
 
     def _build_ui(self) -> None:
-        container = ttk.Frame(self, padding=12)
+        padding = 8 if self.compact_layout else 12
+        container = ttk.Frame(self, padding=padding)
         container.pack(fill=tk.BOTH, expand=True)
 
         header = ttk.Frame(container)
         header.pack(fill=tk.X)
 
-        ttk.Label(header, text="Base URL:").pack(side=tk.LEFT)
-        ttk.Entry(header, textvariable=self.base_url_var, width=36).pack(side=tk.LEFT, padx=(6, 12))
-        ttk.Label(header, text="API Key:").pack(side=tk.LEFT)
-        ttk.Entry(header, textvariable=self.api_key_var, width=28, show="*").pack(side=tk.LEFT, padx=(6, 12))
-        ttk.Button(header, text="Refresh", command=self._refresh_processes).pack(side=tk.LEFT)
+        if self.compact_layout:
+            header.grid_columnconfigure(1, weight=1)
+            ttk.Label(header, text="Base URL:").grid(row=0, column=0, sticky="w")
+            ttk.Entry(header, textvariable=self.base_url_var).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(2, 6))
+            ttk.Label(header, text="API Key:").grid(row=2, column=0, sticky="w")
+            ttk.Entry(header, textvariable=self.api_key_var).grid(row=3, column=0, columnspan=2, sticky="ew", pady=(2, 6))
+            ttk.Button(header, text="Refresh", command=self._refresh).grid(row=0, column=1, sticky="e")
+        else:
+            ttk.Label(header, text="Base URL:").pack(side=tk.LEFT)
+            ttk.Entry(header, textvariable=self.base_url_var, width=36).pack(side=tk.LEFT, padx=(6, 12))
+            ttk.Label(header, text="API Key:").pack(side=tk.LEFT)
+            ttk.Entry(header, textvariable=self.api_key_var, width=28).pack(side=tk.LEFT, padx=(6, 12))
+            ttk.Button(header, text="Refresh", command=self._refresh).pack(side=tk.LEFT)
 
         status_frame = ttk.LabelFrame(container, text="Status", padding=10)
         status_frame.pack(fill=tk.X, pady=(12, 8))
@@ -165,11 +198,23 @@ class PiControlApp(tk.Tk):
         body = ttk.Frame(container)
         body.pack(fill=tk.BOTH, expand=True)
 
-        left = ttk.Frame(body)
-        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 12))
-
-        right = ttk.Frame(body)
-        right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        if self.compact_layout:
+            notebook = ttk.Notebook(body)
+            notebook.pack(fill=tk.BOTH, expand=True)
+            controls_tab = ttk.Frame(notebook, padding=6)
+            calib_tab = ttk.Frame(notebook, padding=6)
+            log_tab = ttk.Frame(notebook, padding=6)
+            notebook.add(controls_tab, text="Controls")
+            notebook.add(calib_tab, text="Calibration")
+            notebook.add(log_tab, text="Log")
+            left = controls_tab
+            right = calib_tab
+        else:
+            left = ttk.Frame(body)
+            left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 12))
+            right = ttk.Frame(body)
+            right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            log_tab = right
 
         nudge_frame = ttk.LabelFrame(left, text="Nudge controls (rotations)", padding=10)
         nudge_frame.pack(fill=tk.X)
@@ -211,7 +256,8 @@ class PiControlApp(tk.Tk):
         ttk.Button(calib_actions, text="Reset calibration", command=self._reset_calibration).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(calib_actions, text="Finalize calibration", command=self._finalize_calibration).pack(side=tk.LEFT)
 
-        log_frame = ttk.LabelFrame(right, text="Log", padding=10)
+        log_frame_parent = log_tab if self.compact_layout else right
+        log_frame = ttk.LabelFrame(log_frame_parent, text="Log", padding=10)
         log_frame.pack(fill=tk.BOTH, expand=True, pady=(12, 0))
         self.log_text = tk.Text(log_frame, height=12, state="disabled")
         self.log_text.pack(fill=tk.BOTH, expand=True)
@@ -231,7 +277,13 @@ class PiControlApp(tk.Tk):
             self._log("Invalid speed value")
             return
         delta = rotations * direction
-        payload = {"mode": "relative", "units": "rotations", "joints": {joint: delta}, "speed": speed}
+        payload = {
+            "mode": "relative",
+            "units": "rotations",
+            "joints": {joint: delta},
+            "speed": speed,
+            "async_exec": False,
+        }
         self._send_command(f"Nudge {joint} {delta} rotations", "/v1/arm/move", payload)
 
     def _set_calibration_point(self, joint: str, name: str) -> None:
@@ -275,6 +327,17 @@ class PiControlApp(tk.Tk):
                 self._log(f"Process refresh failed: {exc}")
 
         threading.Thread(target=task, daemon=True).start()
+
+    def _refresh(self) -> None:
+        self._update_status()
+        self._refresh_processes()
+
+    def _bind_settings_traces(self) -> None:
+        def schedule_refresh(*_: object) -> None:
+            self.after(200, self._update_status)
+
+        self.base_url_var.trace_add("write", schedule_refresh)
+        self.api_key_var.trace_add("write", schedule_refresh)
 
     def _render_processes(self) -> None:
         for child in self.process_container.winfo_children():
