@@ -32,7 +32,7 @@ LOCAL_BASE_URLS = (
     "http://localhost:5001",
 )
 STATUS_INTERVAL_MS = 3000
-REQUEST_TIMEOUT_S = 4.0
+REQUEST_TIMEOUT_S = 15.0
 
 JOINTS = ["A", "B", "C", "D"]
 CALIB_POINTS = {
@@ -355,39 +355,55 @@ class PiControlApp(tk.Tk):
         candidates = _candidate_base_urls(base_url)
         if not base_url:
             candidates = [url for url in candidates if _port_open(url)] or candidates
-        try:
-            last_error = None
-            for candidate in candidates:
-                try:
-                    res = _json_request("POST", f"{candidate}{path}", payload, headers=headers, timeout_s=timeout_s)
-                    self._last_working_base_url = candidate
-                    if (not base_url) or (_is_local_url(base_url) and candidate != base_url):
-                        self.base_url_var.set(candidate)
-                    if not res.get("ok", True):
-                        err = res.get("error", {}).get("message") or res
-                        self._log(f"{label} failed: {err}")
-                    else:
-                        op_id = (res.get("data") or {}).get("operation_id")
-                        if op_id:
-                            self._log(f"{label} queued ✓ ({op_id})")
+
+        def log_on_ui(message: str) -> None:
+            self.after(0, lambda: self._log(message))
+
+        def set_base_url_on_ui(url: str) -> None:
+            self.after(0, lambda: self.base_url_var.set(url))
+
+        def task() -> None:
+            try:
+                last_error = None
+                for candidate in candidates:
+                    try:
+                        res = _json_request(
+                            "POST",
+                            f"{candidate}{path}",
+                            payload,
+                            headers=headers,
+                            timeout_s=timeout_s,
+                        )
+                        self._last_working_base_url = candidate
+                        if (not base_url) or (_is_local_url(base_url) and candidate != base_url):
+                            set_base_url_on_ui(candidate)
+                        if not res.get("ok", True):
+                            err = res.get("error", {}).get("message") or res
+                            log_on_ui(f"{label} failed: {err}")
                         else:
-                            self._log(f"{label} ✓")
-                    return
-                except URLError as exc:
-                    last_error = exc
-                    if base_url and not _is_local_url(base_url):
-                        raise
-            raise last_error or URLError("Connection refused")
-        except URLError as exc:
-            if base_url:
-                self._log(f"{label} failed: {exc}")
-            else:
-                self._log(
-                    f"{label} failed: {exc}. Local API not responding on "
-                    f"{', '.join(LOCAL_BASE_URLS)}"
-                )
-        except Exception as exc:
-            self._log(f"{label} error: {exc}")
+                            op_id = (res.get("data") or {}).get("operation_id")
+                            if op_id:
+                                log_on_ui(f"{label} queued ✓ ({op_id})")
+                            else:
+                                log_on_ui(f"{label} ✓")
+                        return
+                    except URLError as exc:
+                        last_error = exc
+                        if base_url and not _is_local_url(base_url):
+                            raise
+                raise last_error or URLError("Connection refused")
+            except URLError as exc:
+                if base_url:
+                    log_on_ui(f"{label} failed: {exc}")
+                else:
+                    log_on_ui(
+                        f"{label} failed: {exc}. Local API not responding on "
+                        f"{', '.join(LOCAL_BASE_URLS)}"
+                    )
+            except Exception as exc:
+                log_on_ui(f"{label} error: {exc}")
+
+        threading.Thread(target=task, daemon=True).start()
 
     def _refresh_processes(self) -> None:
         base_url = self.base_url_var.get().strip().rstrip("/")
