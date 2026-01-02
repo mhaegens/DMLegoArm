@@ -10,7 +10,9 @@ Runs a local Tkinter UI on the Raspberry Pi screen with:
 
 from __future__ import annotations
 
+import argparse
 import json
+import os
 import socket
 import subprocess
 import threading
@@ -30,7 +32,7 @@ LOCAL_BASE_URLS = (
     "http://localhost:5001",
 )
 STATUS_INTERVAL_MS = 3000
-REQUEST_TIMEOUT_S = 2.5
+REQUEST_TIMEOUT_S = 4.0
 
 JOINTS = ["A", "B", "C", "D"]
 CALIB_POINTS = {
@@ -167,7 +169,7 @@ class StatusIndicator(ttk.Frame):
 
 
 class PiControlApp(tk.Tk):
-    def __init__(self) -> None:
+    def __init__(self, base_url: str = DEFAULT_BASE_URL, api_key: str = "") -> None:
         super().__init__()
         self.title("LEGO Arm - Local Control")
         screen_w = self.winfo_screenwidth()
@@ -178,8 +180,8 @@ class PiControlApp(tk.Tk):
         self.geometry(f"{width}x{height}")
         self.resizable(False, False)
 
-        self.base_url_var = tk.StringVar(value=DEFAULT_BASE_URL)
-        self.api_key_var = tk.StringVar(value="")
+        self.base_url_var = tk.StringVar(value=base_url or DEFAULT_BASE_URL)
+        self.api_key_var = tk.StringVar(value=api_key)
         self.nudge_amount_var = tk.StringVar(value="1")
         self.nudge_speed_var = tk.StringVar(value="40")
         self.status_text_var = tk.StringVar(value="Ready")
@@ -327,7 +329,7 @@ class PiControlApp(tk.Tk):
             "units": "rotations",
             "joints": {joint: delta},
             "speed": speed,
-            "async_exec": False,
+            "async_exec": True,
         }
         self._send_command(f"Nudge {joint} {delta} rotations", "/v1/arm/move", payload)
 
@@ -341,7 +343,13 @@ class PiControlApp(tk.Tk):
     def _finalize_calibration(self) -> None:
         self._send_command("Finalize calibration", "/v1/arm/calibration", {"finalize": True})
 
-    def _send_command(self, label: str, path: str, payload: dict) -> None:
+    def _send_command(
+        self,
+        label: str,
+        path: str,
+        payload: dict,
+        timeout_s: float = REQUEST_TIMEOUT_S,
+    ) -> None:
         base_url = self.base_url_var.get().strip().rstrip("/")
         headers = self._headers()
         candidates = _candidate_base_urls(base_url)
@@ -351,7 +359,7 @@ class PiControlApp(tk.Tk):
             last_error = None
             for candidate in candidates:
                 try:
-                    res = _json_request("POST", f"{candidate}{path}", payload, headers=headers)
+                    res = _json_request("POST", f"{candidate}{path}", payload, headers=headers, timeout_s=timeout_s)
                     self._last_working_base_url = candidate
                     if (not base_url) or (_is_local_url(base_url) and candidate != base_url):
                         self.base_url_var.set(candidate)
@@ -359,7 +367,11 @@ class PiControlApp(tk.Tk):
                         err = res.get("error", {}).get("message") or res
                         self._log(f"{label} failed: {err}")
                     else:
-                        self._log(f"{label} ✓")
+                        op_id = (res.get("data") or {}).get("operation_id")
+                        if op_id:
+                            self._log(f"{label} queued ✓ ({op_id})")
+                        else:
+                            self._log(f"{label} ✓")
                     return
                 except URLError as exc:
                     last_error = exc
@@ -479,6 +491,24 @@ class PiControlApp(tk.Tk):
         threading.Thread(target=runner, daemon=True).start()
 
 
+def _parse_args() -> argparse.Namespace:
+    env_base_url = os.getenv("LEGO_ARM_BASE_URL", "").strip()
+    env_api_key = os.getenv("LEGO_ARM_API_KEY", "").strip()
+    parser = argparse.ArgumentParser(description="LEGO Arm local control UI")
+    parser.add_argument(
+        "--base-url",
+        default=env_base_url or DEFAULT_BASE_URL,
+        help="Arm API base URL",
+    )
+    parser.add_argument(
+        "--api-key",
+        default=env_api_key,
+        help="API key for the Arm API",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    app = PiControlApp()
+    args = _parse_args()
+    app = PiControlApp(base_url=args.base_url, api_key=args.api_key)
     app.mainloop()
