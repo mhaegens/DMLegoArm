@@ -31,7 +31,6 @@ LOCAL_BASE_URLS = (
 )
 STATUS_INTERVAL_MS = 3000
 REQUEST_TIMEOUT_S = 2.5
-MOVE_REQUEST_TIMEOUT_S = 25.0
 
 JOINTS = ["A", "B", "C", "D"]
 CALIB_POINTS = {
@@ -348,18 +347,11 @@ class PiControlApp(tk.Tk):
         candidates = _candidate_base_urls(base_url)
         if not base_url:
             candidates = [url for url in candidates if _port_open(url)] or candidates
-        timeout_s = MOVE_REQUEST_TIMEOUT_S if path == "/v1/arm/move" else REQUEST_TIMEOUT_S
         try:
             last_error = None
             for candidate in candidates:
                 try:
-                    res = _json_request(
-                        "POST",
-                        f"{candidate}{path}",
-                        payload,
-                        headers=headers,
-                        timeout_s=timeout_s,
-                    )
+                    res = _json_request("POST", f"{candidate}{path}", payload, headers=headers)
                     self._last_working_base_url = candidate
                     if (not base_url) or (_is_local_url(base_url) and candidate != base_url):
                         self.base_url_var.set(candidate)
