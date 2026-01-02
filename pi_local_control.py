@@ -564,19 +564,9 @@ class PiControlApp(tk.Tk):
 
 
 def _parse_args() -> argparse.Namespace:
-    env_base_url = os.getenv("LEGO_ARM_BASE_URL", "").strip()
-    env_api_key = os.getenv("LEGO_ARM_API_KEY", "").strip()
     parser = argparse.ArgumentParser(description="LEGO Arm local control UI")
-    parser.add_argument(
-        "--base-url",
-        default=env_base_url or DEFAULT_BASE_URL,
-        help="Arm API base URL",
-    )
-    parser.add_argument(
-        "--api-key",
-        default=env_api_key,
-        help="API key for the Arm API",
-    )
+    parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="Arm API base URL")
+    parser.add_argument("--api-key", default="", help="API key for the Arm API")
     return parser.parse_args()
 
 
