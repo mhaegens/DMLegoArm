@@ -241,6 +241,11 @@ class PiControlApp(tk.Tk):
         self.ind_connect.pack(side=tk.LEFT, padx=(0, 16))
         self.ind_api = StatusIndicator(status_frame, "Arm API reachable")
         self.ind_api.pack(side=tk.LEFT, padx=(0, 16))
+        ttk.Button(
+            status_frame,
+            text="Restart legoarm",
+            command=self._restart_legoarm_service,
+        ).pack(side=tk.RIGHT)
 
         body = ttk.Frame(container)
         body.pack(fill=tk.BOTH, expand=True)
