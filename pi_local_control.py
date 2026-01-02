@@ -41,7 +41,13 @@ CALIB_POINTS = {
 }
 
 
-def _json_request(method: str, url: str, body: Optional[dict] = None, headers: Optional[dict] = None) -> dict:
+def _json_request(
+    method: str,
+    url: str,
+    body: Optional[dict] = None,
+    headers: Optional[dict] = None,
+    timeout_s: float = REQUEST_TIMEOUT_S,
+) -> dict:
     payload = None
     if body is not None:
         payload = json.dumps(body).encode("utf-8")
@@ -50,7 +56,7 @@ def _json_request(method: str, url: str, body: Optional[dict] = None, headers: O
     if headers:
         for key, value in headers.items():
             req.add_header(key, value)
-    with urlopen(req, timeout=REQUEST_TIMEOUT_S) as resp:
+    with urlopen(req, timeout=timeout_s) as resp:
         raw = resp.read().decode("utf-8")
     return json.loads(raw) if raw else {}
 
