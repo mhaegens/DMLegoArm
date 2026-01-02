@@ -10,7 +10,9 @@ Runs a local Tkinter UI on the Raspberry Pi screen with:
 
 from __future__ import annotations
 
+import argparse
 import json
+import os
 import socket
 import subprocess
 import threading
@@ -30,7 +32,7 @@ LOCAL_BASE_URLS = (
     "http://localhost:5001",
 )
 STATUS_INTERVAL_MS = 3000
-REQUEST_TIMEOUT_S = 2.5
+REQUEST_TIMEOUT_S = 15.0
 
 JOINTS = ["A", "B", "C", "D"]
 CALIB_POINTS = {
@@ -167,7 +169,7 @@ class StatusIndicator(ttk.Frame):
 
 
 class PiControlApp(tk.Tk):
-    def __init__(self) -> None:
+    def __init__(self, base_url: str = DEFAULT_BASE_URL, api_key: str = "") -> None:
         super().__init__()
         self.title("LEGO Arm - Local Control")
         screen_w = self.winfo_screenwidth()
@@ -178,8 +180,8 @@ class PiControlApp(tk.Tk):
         self.geometry(f"{width}x{height}")
         self.resizable(False, False)
 
-        self.base_url_var = tk.StringVar(value=DEFAULT_BASE_URL)
-        self.api_key_var = tk.StringVar(value="")
+        self.base_url_var = tk.StringVar(value=base_url or DEFAULT_BASE_URL)
+        self.api_key_var = tk.StringVar(value=api_key)
         self.nudge_amount_var = tk.StringVar(value="1")
         self.nudge_speed_var = tk.StringVar(value="40")
         self.status_text_var = tk.StringVar(value="Ready")
@@ -239,6 +241,11 @@ class PiControlApp(tk.Tk):
         self.ind_connect.pack(side=tk.LEFT, padx=(0, 16))
         self.ind_api = StatusIndicator(status_frame, "Arm API reachable")
         self.ind_api.pack(side=tk.LEFT, padx=(0, 16))
+        ttk.Button(
+            status_frame,
+            text="Restart legoarm",
+            command=self._restart_legoarm_service,
+        ).pack(side=tk.RIGHT)
 
         body = ttk.Frame(container)
         body.pack(fill=tk.BOTH, expand=True)
@@ -249,9 +256,11 @@ class PiControlApp(tk.Tk):
             controls_tab = ttk.Frame(notebook, padding=6)
             calib_tab = ttk.Frame(notebook, padding=6)
             log_tab = ttk.Frame(notebook, padding=6)
+            inventory_tab = ttk.Frame(notebook, padding=6)
             notebook.add(controls_tab, text="Controls")
             notebook.add(calib_tab, text="Calibration")
             notebook.add(log_tab, text="Log")
+            notebook.add(inventory_tab, text="Inventory")
             left = controls_tab
             right = calib_tab
         else:
@@ -259,7 +268,14 @@ class PiControlApp(tk.Tk):
             left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 12))
             right = ttk.Frame(body)
             right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            log_tab = right
+            right_notebook = ttk.Notebook(right)
+            right_notebook.pack(fill=tk.BOTH, expand=True)
+            calib_tab = ttk.Frame(right_notebook, padding=8)
+            log_tab = ttk.Frame(right_notebook, padding=8)
+            inventory_tab = ttk.Frame(right_notebook, padding=8)
+            right_notebook.add(calib_tab, text="Calibration")
+            right_notebook.add(log_tab, text="Log")
+            right_notebook.add(inventory_tab, text="Inventory")
 
         nudge_frame = ttk.LabelFrame(left, text="Nudge controls (rotations)", padding=10)
         nudge_frame.pack(fill=tk.X)
@@ -283,7 +299,7 @@ class PiControlApp(tk.Tk):
         self.process_container = ttk.Frame(proc_frame)
         self.process_container.pack(fill=tk.BOTH, expand=True)
 
-        calib_frame = ttk.LabelFrame(right, text="Calibration points", padding=10)
+        calib_frame = ttk.LabelFrame(calib_tab, text="Calibration points", padding=10)
         calib_frame.pack(fill=tk.BOTH, expand=True)
 
         for joint, points in CALIB_POINTS.items():
@@ -301,11 +317,20 @@ class PiControlApp(tk.Tk):
         ttk.Button(calib_actions, text="Reset calibration", command=self._reset_calibration).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(calib_actions, text="Finalize calibration", command=self._finalize_calibration).pack(side=tk.LEFT)
 
-        log_frame_parent = log_tab if self.compact_layout else right
-        log_frame = ttk.LabelFrame(log_frame_parent, text="Log", padding=10)
+        log_frame = ttk.LabelFrame(log_tab, text="Log", padding=10)
         log_frame.pack(fill=tk.BOTH, expand=True, pady=(12, 0))
         self.log_text = tk.Text(log_frame, height=12, state="disabled")
         self.log_text.pack(fill=tk.BOTH, expand=True)
+
+        inventory_frame = ttk.LabelFrame(inventory_tab, text="Inventory response", padding=10)
+        inventory_frame.pack(fill=tk.BOTH, expand=True)
+        inventory_actions = ttk.Frame(inventory_frame)
+        inventory_actions.pack(fill=tk.X)
+        ttk.Button(inventory_actions, text="Fetch inventory", command=self._refresh_inventory).pack(
+            side=tk.LEFT
+        )
+        self.inventory_text = tk.Text(inventory_frame, height=12, state="disabled")
+        self.inventory_text.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
 
         status_bar = ttk.Label(container, textvariable=self.status_text_var, anchor="w")
         status_bar.pack(fill=tk.X, pady=(8, 0))
@@ -327,7 +352,7 @@ class PiControlApp(tk.Tk):
             "units": "rotations",
             "joints": {joint: delta},
             "speed": speed,
-            "async_exec": False,
+            "async_exec": True,
         }
         self._send_command(f"Nudge {joint} {delta} rotations", "/v1/arm/move", payload)
 
@@ -341,41 +366,67 @@ class PiControlApp(tk.Tk):
     def _finalize_calibration(self) -> None:
         self._send_command("Finalize calibration", "/v1/arm/calibration", {"finalize": True})
 
-    def _send_command(self, label: str, path: str, payload: dict) -> None:
+    def _send_command(
+        self,
+        label: str,
+        path: str,
+        payload: dict,
+        timeout_s: float = REQUEST_TIMEOUT_S,
+    ) -> None:
         base_url = self.base_url_var.get().strip().rstrip("/")
         headers = self._headers()
         candidates = _candidate_base_urls(base_url)
         if not base_url:
             candidates = [url for url in candidates if _port_open(url)] or candidates
-        try:
-            last_error = None
-            for candidate in candidates:
-                try:
-                    res = _json_request("POST", f"{candidate}{path}", payload, headers=headers)
-                    self._last_working_base_url = candidate
-                    if (not base_url) or (_is_local_url(base_url) and candidate != base_url):
-                        self.base_url_var.set(candidate)
-                    if not res.get("ok", True):
-                        err = res.get("error", {}).get("message") or res
-                        self._log(f"{label} failed: {err}")
-                    else:
-                        self._log(f"{label} ✓")
-                    return
-                except URLError as exc:
-                    last_error = exc
-                    if base_url and not _is_local_url(base_url):
-                        raise
-            raise last_error or URLError("Connection refused")
-        except URLError as exc:
-            if base_url:
-                self._log(f"{label} failed: {exc}")
-            else:
-                self._log(
-                    f"{label} failed: {exc}. Local API not responding on "
-                    f"{', '.join(LOCAL_BASE_URLS)}"
-                )
-        except Exception as exc:
-            self._log(f"{label} error: {exc}")
+
+        def log_on_ui(message: str) -> None:
+            self.after(0, lambda: self._log(message))
+
+        def set_base_url_on_ui(url: str) -> None:
+            self.after(0, lambda: self.base_url_var.set(url))
+
+        def task() -> None:
+            try:
+                last_error = None
+                for candidate in candidates:
+                    try:
+                        res = _json_request(
+                            "POST",
+                            f"{candidate}{path}",
+                            payload,
+                            headers=headers,
+                            timeout_s=timeout_s,
+                        )
+                        self._last_working_base_url = candidate
+                        if (not base_url) or (_is_local_url(base_url) and candidate != base_url):
+                            set_base_url_on_ui(candidate)
+                        if not res.get("ok", True):
+                            err = res.get("error", {}).get("message") or res
+                            log_on_ui(f"{label} failed: {err}")
+                        else:
+                            op_id = (res.get("data") or {}).get("operation_id")
+                            if op_id:
+                                log_on_ui(f"{label} queued ✓ ({op_id})")
+                            else:
+                                log_on_ui(f"{label} ✓")
+                        return
+                    except URLError as exc:
+                        last_error = exc
+                        if base_url and not _is_local_url(base_url):
+                            raise
+                raise last_error or URLError("Connection refused")
+            except URLError as exc:
+                if base_url:
+                    log_on_ui(f"{label} failed: {exc}")
+                else:
+                    log_on_ui(
+                        f"{label} failed: {exc}. Local API not responding on "
+                        f"{', '.join(LOCAL_BASE_URLS)}"
+                    )
+            except Exception as exc:
+                log_on_ui(f"{label} error: {exc}")
+
+        threading.Thread(target=task, daemon=True).start()
 
     def _refresh_processes(self) -> None:
         base_url = self.base_url_var.get().strip().rstrip("/")
@@ -412,6 +463,65 @@ class PiControlApp(tk.Tk):
     def _refresh(self) -> None:
         self._update_status()
         self._refresh_processes()
+
+    def _refresh_inventory(self) -> None:
+        base_url = self.base_url_var.get().strip().rstrip("/")
+        headers = self._headers()
+        candidates = _candidate_base_urls(base_url)
+        if not base_url:
+            candidates = [url for url in candidates if _port_open(url)] or candidates
+
+        def update_text(message: str) -> None:
+            self.inventory_text.configure(state="normal")
+            self.inventory_text.delete("1.0", tk.END)
+            self.inventory_text.insert(tk.END, message)
+            self.inventory_text.configure(state="disabled")
+
+        def task() -> None:
+            try:
+                last_error = None
+                for candidate in candidates:
+                    try:
+                        res = _json_request("GET", f"{candidate}/v1/inventory", headers=headers)
+                        data = res.get("data", res)
+                        pretty = json.dumps(data, indent=2, sort_keys=True)
+                        self.after(0, lambda: update_text(pretty))
+                        self._last_working_base_url = candidate
+                        if (not base_url) or (_is_local_url(base_url) and candidate != base_url):
+                            self.after(0, lambda: self.base_url_var.set(candidate))
+                        self.after(0, lambda: self._log("Inventory refreshed"))
+                        return
+                    except URLError as exc:
+                        last_error = exc
+                        if base_url and not _is_local_url(base_url):
+                            raise
+                raise last_error or URLError("Connection refused")
+            except Exception as exc:
+                self.after(0, lambda: update_text(f"Inventory fetch failed: {exc}"))
+                self.after(0, lambda: self._log(f"Inventory refresh failed: {exc}"))
+
+        threading.Thread(target=task, daemon=True).start()
+
+    def _restart_legoarm_service(self) -> None:
+        def task() -> None:
+            try:
+                result = subprocess.run(
+                    ["sudo", "-n", "systemctl", "restart", "legoarm"],
+                    check=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                if result.returncode == 0:
+                    message = "legoarm service restart requested ✓"
+                else:
+                    stderr = result.stderr.strip() or "Unknown error"
+                    message = f"legoarm restart failed: {stderr}"
+                self.after(0, lambda: self._log(message))
+            except Exception as exc:
+                self.after(0, lambda: self._log(f"legoarm restart error: {exc}"))
+
+        threading.Thread(target=task, daemon=True).start()
 
     def _bind_settings_traces(self) -> None:
         def schedule_refresh(*_: object) -> None:
@@ -479,6 +589,24 @@ class PiControlApp(tk.Tk):
         threading.Thread(target=runner, daemon=True).start()
 
 
+def _parse_args() -> argparse.Namespace:
+    env_base_url = os.getenv("LEGO_ARM_BASE_URL", "").strip()
+    env_api_key = os.getenv("LEGO_ARM_API_KEY", "").strip()
+    parser = argparse.ArgumentParser(description="LEGO Arm local control UI")
+    parser.add_argument(
+        "--base-url",
+        default=env_base_url or DEFAULT_BASE_URL,
+        help="Arm API base URL",
+    )
+    parser.add_argument(
+        "--api-key",
+        default=env_api_key,
+        help="API key for the Arm API",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    app = PiControlApp()
+    args = _parse_args()
+    app = PiControlApp(base_url=args.base_url, api_key=args.api_key)
     app.mainloop()

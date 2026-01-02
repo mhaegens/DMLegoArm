@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=LEGO Arm Control
+Exec=/usr/bin/env LEGO_ARM_API_KEY=YOUR_API_KEY_HERE python3 /home/pi/Desktop/pi_local_control.py
+Icon=utilities-terminal
+Terminal=false
