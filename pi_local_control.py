@@ -600,18 +600,20 @@ class PiControlApp(tk.Tk):
 
     def _restart_legoarm_service(self) -> None:
         def task() -> None:
-            commands = (["systemctl", "restart", "legoarm"], ["systemctl", "--user", "restart", "legoarm"])
-            for command in commands:
-                result = subprocess.run(
-                    command,
-                    check=False,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                )
-                if result.returncode == 0:
-                    self.after(0, lambda: self._log("Restarted legoarm service ✓"))
-                    return
+            script_path = os.path.join(os.path.dirname(__file__), "restart-legoarm.sh")
+            if not os.path.exists(script_path):
+                self.after(0, lambda: self._log(f"Restart legoarm failed: {script_path} not found"))
+                return
+            result = subprocess.run(
+                ["bash", script_path],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            if result.returncode == 0:
+                self.after(0, lambda: self._log("Restarted legoarm service ✓"))
+                return
             error = result.stderr.strip() or result.stdout.strip() or "Unknown error"
             self.after(0, lambda: self._log(f"Restart legoarm failed: {error}"))
 
