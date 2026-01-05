@@ -40,7 +40,7 @@ CALIB_POINTS = {
     "A": [("open", "Open"), ("closed", "Closed")],
     "B": [("min", "Min"), ("pick", "Pick"), ("max", "Max")],
     "C": [("min", "Min"), ("pick", "Pick"), ("max", "Max")],
-    "D": [("assembly", "Assembly"), ("quality", "Quality"), ("neutral", "Neutral")],
+    "D": [("assembly", "Assembly"), ("neutral", "Neutral"), ("quality", "Quality")],
 }
 
 
@@ -368,7 +368,7 @@ class PiControlApp(tk.Tk):
             "units": "rotations",
             "joints": {joint: delta},
             "speed": speed,
-            "async_exec": True,
+            "async_exec": False,
         }
         self._send_command(f"Nudge {joint} {delta} rotations", "/v1/arm/move", payload)
 
@@ -387,7 +387,7 @@ class PiControlApp(tk.Tk):
             "units": "degrees",
             "joints": {joint: name},
             "speed": speed,
-            "async_exec": True,
+            "async_exec": False,
         }
         self._send_command(f"Move {joint} to {name}", "/v1/arm/move", payload)
 
