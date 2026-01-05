@@ -295,6 +295,21 @@ class PiControlApp(tk.Tk):
             ttk.Button(row, text="-", width=6, command=lambda j=joint: self._nudge(j, -1)).pack(side=tk.LEFT, padx=(6, 4))
             ttk.Button(row, text="+", width=6, command=lambda j=joint: self._nudge(j, 1)).pack(side=tk.LEFT)
 
+        point_frame = ttk.LabelFrame(left, text="Move to calibration points", padding=10)
+        point_frame.pack(fill=tk.X, pady=(12, 0))
+        ttk.Label(point_frame, text="Uses the recorded calibration points.").pack(anchor="w")
+
+        for joint, points in CALIB_POINTS.items():
+            joint_frame = ttk.Frame(point_frame)
+            joint_frame.pack(fill=tk.X, pady=4)
+            ttk.Label(joint_frame, text=f"Joint {joint}", width=10).pack(side=tk.LEFT)
+            for name, label in points:
+                ttk.Button(
+                    joint_frame,
+                    text=label,
+                    command=lambda j=joint, n=name: self._move_to_calibration_point(j, n),
+                ).pack(side=tk.LEFT, padx=4)
+
         proc_frame = ttk.LabelFrame(left, text="Production processes", padding=10)
         proc_frame.pack(fill=tk.BOTH, expand=True, pady=(12, 0))
         self.process_container = ttk.Frame(proc_frame)
@@ -360,6 +375,21 @@ class PiControlApp(tk.Tk):
     def _set_calibration_point(self, joint: str, name: str) -> None:
         payload = {"joint": joint, "name": name}
         self._send_command(f"Set calibration {joint}:{name}", "/v1/arm/calibration", payload)
+
+    def _move_to_calibration_point(self, joint: str, name: str) -> None:
+        try:
+            speed = int(float(self.nudge_speed_var.get()))
+        except ValueError:
+            self._log("Invalid speed value")
+            return
+        payload = {
+            "mode": "absolute",
+            "units": "degrees",
+            "joints": {joint: name},
+            "speed": speed,
+            "async_exec": True,
+        }
+        self._send_command(f"Move {joint} to {name}", "/v1/arm/move", payload)
 
     def _reset_calibration(self) -> None:
         self._send_command("Reset calibration", "/v1/arm/calibration", {"reset": True})
