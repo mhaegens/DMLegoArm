@@ -757,6 +757,10 @@ class ArmController:
         ok = all(errs[j] <= tol[j] for j in target)
         return ok, errs
 
+    def read_position(self) -> Dict[str, float]:
+        with self.lock:
+            return self.current_abs.copy()
+
     def recover_to_home(self, speed: int = 30, timeout_s: float = 90.0):
         if not self._acquire_busy():
             raise RuntimeError("BUSY")

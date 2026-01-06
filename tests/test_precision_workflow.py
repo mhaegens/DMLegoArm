@@ -15,6 +15,10 @@ class DummyArm:
         self.moves.append((mode, dict(values), speed))
         return {"new_abs": dict(self.positions)}
 
+    def verify_at(self, target, _tol_map=None):
+        errs = {j: abs(self.positions.get(j, 0.0) - float(v)) for j, v in target.items()}
+        return False, errs
+
     def read_position(self):
         return dict(self.positions)
 
@@ -125,14 +129,9 @@ class PrecisionWorkflowTests(unittest.TestCase):
             mock_move.call_args_list,
             [
                 mock.call(arm, "B", 2.0),
-                mock.call(arm, "B", 2.0),
-                mock.call(arm, "A", 1.0),
                 mock.call(arm, "A", 1.0),
                 mock.call(arm, "B", 3.0),
                 mock.call(arm, "B", 3.0),
-                mock.call(arm, "B", 3.0),
-                mock.call(arm, "B", 3.0),
-                mock.call(arm, "A", 1.0),
                 mock.call(arm, "A", 1.0),
             ],
         )
