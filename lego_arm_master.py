@@ -121,6 +121,9 @@ class ArmController:
             "finalize_corrections": {},
             "timeout": False,
         }
+        self._health_lock = threading.Lock()
+        self._last_motor_ok = time.time()
+        self._last_motor_error: Optional[str] = None
         try:
             with open(self._calib_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -239,13 +242,15 @@ class ArmController:
                     if getter:
                         try:
                             self.current_abs[j] = float(getter())
+                            self._note_motor_ok()
                         except Exception:
                             pass
         return {"motors": targets, "coast": enable}
 
     def save_calibration(self) -> None:
         try:
-            with open(self._calib_path, "w", encoding="utf-8") as f:
+            temp_path = f"{self._calib_path}.tmp"
+            with open(temp_path, "w", encoding="utf-8") as f:
                 json.dump({
                     "backlash": self.backlash,
                     "rotation": self.rotation_deg,
@@ -253,8 +258,52 @@ class ArmController:
                     "speed_scale": self.speed_deg_per_sec,
                     "points": self.points,
                 }, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, self._calib_path)
         except Exception:
             pass
+
+    def _note_motor_ok(self) -> None:
+        with self._health_lock:
+            self._last_motor_ok = time.time()
+
+    def _note_motor_error(self, message: str) -> None:
+        with self._health_lock:
+            self._last_motor_error = message
+
+    def motor_health_snapshot(self) -> dict:
+        with self._health_lock:
+            return {
+                "last_ok": self._last_motor_ok,
+                "last_error": self._last_motor_error,
+            }
+
+    def poll_motor_health(self) -> bool:
+        if USE_FAKE:
+            self._note_motor_ok()
+            return True
+        ok = True
+        last_error = None
+        for joint, motor in self.motors.items():
+            getter = getattr(motor, "get_degrees", None) or getattr(motor, "get_position", None)
+            if not getter:
+                last_error = f"Motor {joint} missing position getter"
+                ok = False
+                continue
+            try:
+                getter()
+            except Exception as exc:
+                last_error = f"Motor {joint} health check failed: {exc}"
+                ok = False
+            else:
+                self._note_motor_ok()
+        if ok:
+            with self._health_lock:
+                self._last_motor_error = None
+        elif last_error:
+            self._note_motor_error(last_error)
+        return ok
 
     def set_backlash(self, values: Dict[str, float]) -> dict:
         with self.lock:
@@ -477,6 +526,7 @@ class ArmController:
                                 speed_mag,
                             )
                         motor.run_for_rotations(run_rot, speed=speed_mag, blocking=True)  # type: ignore[arg-type]
+                        self._note_motor_ok()
                         if deadline is not None and time.time() > deadline:
                             timeout_triggered = True
                             self._last_dir[joint] = direction
@@ -517,6 +567,7 @@ class ArmController:
                                 len(chunks),
                             )
                             motor.run_for_degrees(chunk, speed=speed_mag, blocking=True)  # type: ignore[arg-type]
+                            self._note_motor_ok()
                     self._last_dir[joint] = direction
 
                 self.stop_event.clear()
@@ -529,7 +580,9 @@ class ArmController:
                     getter = getattr(mtr, "get_degrees", None) or getattr(mtr, "get_position", None)
                     if getter:
                         try:
-                            return float(getter())
+                            value = float(getter())
+                            self._note_motor_ok()
+                            return value
                         except Exception:
                             return None
                     return None
@@ -1389,9 +1442,38 @@ def _create_server(host: str, port: int) -> HTTPServer:
     return ThreadingHTTPServer((bind_host, port), Handler)
 
 
+def _motor_watchdog_loop(controller: ArmController, interval_s: float, grace_s: float) -> None:
+    logger.info(
+        "Motor watchdog enabled interval=%.2fs grace=%.2fs",
+        interval_s,
+        grace_s,
+    )
+    while True:
+        time.sleep(interval_s)
+        try:
+            healthy = controller.poll_motor_health()
+        except Exception as exc:
+            logger.error("Motor watchdog check raised %s; exiting for restart", exc, exc_info=True)
+            os._exit(1)
+        snapshot = controller.motor_health_snapshot()
+        last_ok = snapshot["last_ok"]
+        last_error = snapshot["last_error"]
+        age = time.time() - last_ok
+        if not healthy and age >= grace_s:
+            logger.error(
+                "Motor layer unhealthy for %.2fs (last ok %.2fs ago). Last error: %s. Exiting for restart.",
+                age,
+                age,
+                last_error or "unknown",
+            )
+            os._exit(1)
+
+
 def run_server():
     port = int(os.getenv("PORT", "8000"))
     host = os.getenv("HOST", "0.0.0.0")
+    watchdog_interval = float(os.getenv("MOTOR_WATCHDOG_INTERVAL_S", "2"))
+    watchdog_grace = float(os.getenv("MOTOR_WATCHDOG_GRACE_S", "6"))
     server = _create_server(host, port)
     server_address = server.server_address
     if isinstance(server_address, tuple):
@@ -1403,6 +1485,13 @@ def run_server():
         display_host, display_port = str(server_address), port
     host_for_log = f"[{display_host}]" if ":" in display_host else display_host
     logger.info("LEGO Arm REST listening on http://%s:%s", host_for_log, display_port)
+    if not USE_FAKE:
+        watchdog_thread = threading.Thread(
+            target=_motor_watchdog_loop,
+            args=(arm, watchdog_interval, watchdog_grace),
+            daemon=True,
+        )
+        watchdog_thread.start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
