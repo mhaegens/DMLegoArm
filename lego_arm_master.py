@@ -91,20 +91,13 @@ class ArmController:
             "D": Motor("D"),  # rotation
         }
         self.current_abs: Dict[str, float] = {k: 0.0 for k in self.motors}
-        # Backlash compensation (degrees) for direction changes per motor.  The
-        # values persist in ``arm_calibration.json`` and may be overridden at
-        # startup via env vars ``ARM_BACKLASH_A``..``D``.  Useful when gears
-        # have slack and initial motion doesn't move the joint.
         self._calib_path = os.path.join(os.path.dirname(__file__), "arm_calibration.json")
-        self.backlash: Dict[str, float] = {j: 0.0 for j in self.motors}
         # Degrees the motor must rotate for one full joint rotation. Defaults to
         # 360° but can be tuned per motor via the admin UI.
         self.rotation_deg: Dict[str, float] = {j: 360.0 for j in self.motors}
         # Empirical degrees-per-second scale factor per motor.  Used only to
         # estimate generous timeout budgets when callers opt-in.
         self.speed_deg_per_sec: Dict[str, float] = {j: 6.0 for j in self.motors}
-        # Track last movement direction per motor: -1, 0, 1
-        self._last_dir: Dict[str, int] = {j: 0 for j in self.motors}
         # Named points per joint (e.g., "closed", "home").  Populated after
         # calibration and persisted in ``arm_calibration.json``.
         self.points: Dict[str, Dict[str, float]] = {j: {} for j in self.motors}
@@ -127,9 +120,7 @@ class ArmController:
         try:
             with open(self._calib_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            self.backlash.update({j: float(data.get("backlash", {}).get(j, 0.0)) for j in self.motors})
             self.rotation_deg.update({j: float(data.get("rotation", {}).get(j, 360.0)) for j in self.motors})
-            self._last_dir.update({j: int(data.get("last_dir", {}).get(j, 0)) for j in self.motors})
             scale = data.get("speed_scale", {})
             for j in self.motors:
                 try:
@@ -147,13 +138,6 @@ class ArmController:
             pass
         except Exception:
             pass
-        for j in self.motors:
-            env = os.getenv(f"ARM_BACKLASH_{j}")
-            if env is not None:
-                try:
-                    self.backlash[j] = float(env)
-                except ValueError:
-                    pass
         for j in self.rotation_deg:
             if not isinstance(self.rotation_deg[j], (int, float)) or self.rotation_deg[j] <= 0:
                 self.rotation_deg[j] = 360.0
@@ -252,9 +236,7 @@ class ArmController:
             temp_path = f"{self._calib_path}.tmp"
             with open(temp_path, "w", encoding="utf-8") as f:
                 json.dump({
-                    "backlash": self.backlash,
                     "rotation": self.rotation_deg,
-                    "last_dir": self._last_dir,
                     "speed_scale": self.speed_deg_per_sec,
                     "points": self.points,
                 }, f)
@@ -305,17 +287,6 @@ class ArmController:
             self._note_motor_error(last_error)
         return ok
 
-    def set_backlash(self, values: Dict[str, float]) -> dict:
-        with self.lock:
-            for j, v in values.items():
-                if j in self.motors:
-                    try:
-                        self.backlash[j] = float(v)
-                    except (TypeError, ValueError):
-                        continue
-            self.save_calibration()
-            return {"backlash": self.backlash.copy()}
-
     def set_rotation(self, values: Dict[str, float]) -> dict:
         with self.lock:
             for j, v in values.items():
@@ -331,9 +302,6 @@ class ArmController:
             self.rotation_deg["A"] = 360.0
             self.save_calibration()
             return {"rotation": self.rotation_deg.copy()}
-
-    def last_direction(self) -> dict:
-        return self._last_dir.copy()
 
     def resolve_point(self, joint: str, value: str) -> float:
         """Return absolute degrees for a named point expression.
@@ -449,7 +417,6 @@ class ArmController:
                         "delta_deg": delta_deg,
                         "is_rotation": is_rotation,
                         "direction": direction,
-                        "backlash_comp": 0.0,
                     }
                     if is_rotation:
                         entry["rot_per"] = rot_per
@@ -484,52 +451,32 @@ class ArmController:
                     delta = float(info["delta_deg"])
                     if abs(delta) < 1e-6:
                         continue
-                    direction = 1 if delta > 0 else -1
-                    backlash = self.backlash.get(joint, 0.0)
                     run_delta = delta
-                    comp = 0.0
-                    if direction != 0 and direction != self._last_dir[joint]:
-                        comp = backlash * direction
-                        run_delta += comp
                     motor = info["motor"]  # type: ignore[assignment]
-                    info["backlash_comp"] = comp
 
                     if info.get("is_rotation"):
                         rot_per = float(info.get("rot_per") or self.rotation_deg.get(joint, 360.0) or 360.0)
                         requested_rot = float(info.get("delta_rot", run_delta / rot_per))
                         run_rot = run_delta / rot_per
-                        extra_rot = run_rot - requested_rot
                         if self.stop_event.is_set():
                             self.stop_event.clear()
                             raise InterruptedError("Movement interrupted")
                         if deadline is not None and time.time() > deadline:
                             timeout_triggered = True
-                            self._last_dir[joint] = direction
                             self.stop_event.clear()
                             raise TimeoutError(
                                 f"Movement timed out after {timeout_val:.2f}s"
                             )
-                        if abs(extra_rot) > 1e-6:
-                            logger.info(
-                                "Moving joint %s by %.3f rotations at speed %d (command %.3f + backlash %.3f)",
-                                joint,
-                                run_rot,
-                                speed_mag,
-                                requested_rot,
-                                extra_rot,
-                            )
-                        else:
-                            logger.info(
-                                "Moving joint %s by %.3f rotations at speed %d",
-                                joint,
-                                run_rot,
-                                speed_mag,
-                            )
+                        logger.info(
+                            "Moving joint %s by %.3f rotations at speed %d",
+                            joint,
+                            run_rot,
+                            speed_mag,
+                        )
                         motor.run_for_rotations(run_rot, speed=speed_mag, blocking=True)  # type: ignore[arg-type]
                         self._note_motor_ok()
                         if deadline is not None and time.time() > deadline:
                             timeout_triggered = True
-                            self._last_dir[joint] = direction
                             self.stop_event.clear()
                             raise TimeoutError(
                                 f"Movement timed out after {timeout_val:.2f}s"
@@ -553,7 +500,6 @@ class ArmController:
                                     motor.stop()
                                 except Exception:
                                     pass
-                                self._last_dir[joint] = direction
                                 self.stop_event.clear()
                                 raise TimeoutError(
                                     f"Movement timed out after {timeout_val:.2f}s"
@@ -568,8 +514,6 @@ class ArmController:
                             )
                             motor.run_for_degrees(chunk, speed=speed_mag, blocking=True)  # type: ignore[arg-type]
                             self._note_motor_ok()
-                    self._last_dir[joint] = direction
-
                 self.stop_event.clear()
 
                 final_positions: Dict[str, float] = {}
@@ -848,7 +792,6 @@ class ArmController:
             "abs_degrees": self.current_abs.copy(),
             "limits": self.limits.copy(),
             "motors": list(self.motors.keys()),
-            "backlash": self.backlash.copy(),
             "rotation": self.rotation_deg.copy(),
             "calibrated": self.calibrated,
             "points": {j: pts.copy() for j, pts in self.points.items()},
@@ -1085,14 +1028,12 @@ class Handler(BaseHTTPRequestHandler):
                     "GET /v1/health",
                     "GET /v1/inventory",
                     "GET /v1/arm/state",
-                    "GET /v1/arm/backlash",
                     "GET /v1/arm/rotation",
                     "POST /v1/arm/move",
                     "POST /v1/arm/pose",
                     "POST /v1/arm/stop",
                     "POST /v1/arm/coast",
                     "POST /v1/arm/pickplace",
-                    "POST /v1/arm/backlash",
                     "POST /v1/arm/rotation",
                     "POST /v1/arm/recover",
                     "GET /v1/operations/{id}",
@@ -1106,10 +1047,6 @@ class Handler(BaseHTTPRequestHandler):
             if (resp := auth_ok(self)):
                 return json_response(self, resp[0], resp[1])
             return json_response(self, {"ok": True, "data": arm.state()})
-        if path == "/v1/arm/backlash":
-            if (resp := auth_ok(self)):
-                return json_response(self, resp[0], resp[1])
-            return json_response(self, {"ok": True, "data": {"backlash": arm.backlash.copy(), "last_dir": arm.last_direction()}})
         if path == "/v1/arm/rotation":
             if (resp := auth_ok(self)):
                 return json_response(self, resp[0], resp[1])
@@ -1175,7 +1112,7 @@ class Handler(BaseHTTPRequestHandler):
         logger.info("POST %s from %s", self.path, self.client_address[0])
         parsed = urlparse(self.path)
         path = parsed.path
-        if path.startswith("/v1/processes/") or path in ("/v1/arm/move", "/v1/arm/pose", "/v1/arm/pickplace", "/v1/arm/stop", "/v1/arm/coast", "/v1/arm/backlash", "/v1/arm/calibration", "/v1/arm/recover", "/v1/arm/rotation"):
+        if path.startswith("/v1/processes/") or path in ("/v1/arm/move", "/v1/arm/pose", "/v1/arm/pickplace", "/v1/arm/stop", "/v1/arm/coast", "/v1/arm/calibration", "/v1/arm/recover", "/v1/arm/rotation"):
             if (resp := auth_ok(self)):
                 return json_response(self, resp[0], resp[1])
         if path == "/v1/arm/stop":
@@ -1330,18 +1267,6 @@ class Handler(BaseHTTPRequestHandler):
                     idem_store(self, resp)
                     return json_response(self, resp)
                 res = arm.pickplace(location, action, speed)
-                resp = {"ok": True, "data": res}
-                idem_store(self, resp)
-                return json_response(self, resp)
-
-            if path == "/v1/arm/backlash":
-                vals = body.get("backlash") if isinstance(body, dict) else None
-                if vals is None:
-                    vals = body
-                if not isinstance(vals, dict):
-                    return json_response(self, {"ok": False, "error": {"code": "BAD_BACKLASH", "message": "Provide backlash map"}}, 400)
-                res = arm.set_backlash(vals)
-                res["last_dir"] = arm.last_direction()
                 resp = {"ok": True, "data": res}
                 idem_store(self, resp)
                 return json_response(self, resp)
