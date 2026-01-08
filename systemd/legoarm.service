@@ -2,21 +2,25 @@
 Description=LEGO Arm HTTP API (stdlib)
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
+# CHANGE: set the user/group that owns the files and hardware access.
 User=lego
 Group=lego
+# CHANGE: set the folder on the device where the repo lives.
 WorkingDirectory=/path/to/lego-arm
+# CHANGE: set the full path to the server script on the device.
 ExecStart=/usr/bin/python3 /path/to/lego_arm_master.py
-Environment=PORT=5001
-Environment=API_KEY=<YOUR_API_KEY>
-Environment=USE_FAKE_MOTORS=1
+# CHANGE: set the path to your environment file (keys, ports, etc).
+EnvironmentFile=-/etc/legoarm.env
 # For localhost-only dev you may allow no auth:
 # Environment=ALLOW_NO_AUTH_LOCAL=1
 SyslogIdentifier=legoarm
 StandardOutput=journal
 StandardError=journal
-Restart=on-failure
+Restart=always
+RestartSec=2
 
 [Install]
 WantedBy=multi-user.target
