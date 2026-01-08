@@ -97,6 +97,7 @@
                 <HBox renderType="Bare" class="sapUiTinyMarginBottom">
                   <Button text="Min" press=".onJointPresetBMin" class="sapUiTinyMarginEnd"/>
                   <Button text="Pick" press=".onJointPresetBPick" class="sapUiTinyMarginEnd"/>
+                  <Button text="Raised" press=".onJointPresetBRaised" class="sapUiTinyMarginEnd"/>
                   <Button text="Max" press=".onJointPresetBMax"/>
                 </HBox>
 
@@ -104,6 +105,7 @@
                 <HBox renderType="Bare" class="sapUiTinyMarginBottom">
                   <Button text="Min" press=".onJointPresetCMin" class="sapUiTinyMarginEnd"/>
                   <Button text="Pick" press=".onJointPresetCPick" class="sapUiTinyMarginEnd"/>
+                  <Button text="Raised" press=".onJointPresetCRaised" class="sapUiTinyMarginEnd"/>
                   <Button text="Max" press=".onJointPresetCMax"/>
                 </HBox>
 
