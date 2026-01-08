@@ -5,9 +5,12 @@ Wants=network-online.target
 StartLimitIntervalSec=0
 
 [Service]
+# CHANGE: set the user/group that owns the files and hardware access.
 User=lego
 Group=lego
+# CHANGE: set the folder on the device where the repo lives.
 WorkingDirectory=/path/to/lego-arm
+# CHANGE: set the full path to the server script on the device.
 ExecStart=/usr/bin/python3 /path/to/lego_arm_master.py
 # Load config from an external file, e.g. /etc/legoarm.env
 EnvironmentFile=-/etc/legoarm.env
