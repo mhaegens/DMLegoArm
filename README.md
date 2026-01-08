@@ -2,7 +2,7 @@
 
 A small, **zero-dependency** HTTP service that drives a LEGO® robotic arm (via Raspberry Pi + Build HAT) and exposes a **stable, versioned REST API** designed for **SAP Digital Manufacturing (DM)** integration through ngrok.
 
-This README documents the **final architecture** we shipped, why we chose it, how to run it, and where its limits are.
+This README documents the **final architecture** I shipped, why I chose it, how to run it, and where its limits are.
 
 ---
 
@@ -12,15 +12,16 @@ This README documents the **final architecture** we shipped, why we chose it, ho
 * **Endpoints**: `/v1/*` (health, state, move, pose, pick/place, stop, coast, async ops, production processes)
 * **Auth**: API key in header `x-api-key`
 * **Idempotency**: `X-Idempotency-Key` (in-memory cache; 5-minute TTL)
-* **Async**: Background worker + `GET /v1/operations/{id}`
+* **Async**: Background worker + `GET /v1/operations/{id}` (default for moves/poses/pickplace)
 * **DM-ready**: Works with Service Registry + POD buttons via ngrok
 * **Hardware toggle**: `USE_FAKE_MOTORS=1` to simulate without the Build HAT
+* **Calibration**: Named points + rotation tuning persisted in `arm_calibration.json`
 
 ---
 
-## Why this architecture (and what we didn’t do)
+## Why this architecture (and what I didn’t do)
 
-We intentionally **removed external web frameworks** (Flask/FastAPI) to avoid package management on constrained or locked-down devices. The server uses `http.server` + `threading`. That makes deployment trivial (copy one file, set env vars), and the API contract stays the same.
+I intentionally **removed external web frameworks** (Flask/FastAPI) to avoid package management on constrained or locked-down devices. The server uses `http.server` + `threading`. That makes deployment trivial (copy one file, set env vars), and the API contract stays the same.
 
 **Trade-offs (be critical):**
 
@@ -81,8 +82,6 @@ repo/
 ├─ processes/                # on-device production process modules
 ├─ web/
 │  └─ index.html             # built-in on-device control UI
-├─ examples/
-│  └─ tester.html            # tiny browser client for manual testing
 └─ systemd/
    └─ legoarm.service        # optional unit file (example below)
 ```
@@ -99,9 +98,13 @@ The production processes shipped with this repo are:
 | ---------------------------------- | ----------------------------------------------------- |
 | LEGO_ARM_PICK_ASSEMBLY_QUALITY     | `https://<host>/v1/processes/pick-assembly-quality`   |
 | LEGO_ARM_PICK_QUALITY_ASSEMBLY     | `https://<host>/v1/processes/pick-quality-assembly`   |
+| LEGO_ARM_SHUTDOWN                  | `https://<host>/v1/processes/shutdown`                |
+| LEGO_ARM_TEST                      | `https://<host>/v1/processes/test`                    |
 
 See [`processes/README.md`](processes/README.md) for details on creating new
 workflows.
+
+> Note: `POST /v1/processes/*`, `POST /v1/arm/pose`, and `POST /v1/arm/pickplace` require calibration to be finalized first; otherwise the API returns `NOT_CALIBRATED`.
 
 **Key components inside `lego_arm_master.py`:**
 
@@ -116,23 +119,27 @@ workflows.
 
 Set through environment variables (systemd or shell):
 
-| Variable              | Required | Default | What it does                                                      |
-| --------------------- | -------- | ------- | ----------------------------------------------------------------- |
-| `API_KEY`             | **Yes**  | (none)  | Shared secret for all control endpoints (`x-api-key` header).     |
-| `PORT`                | No       | `8000`  | Local listen port.                                                |
-| `USE_FAKE_MOTORS`     | No       | `0`     | `1` to simulate motors (dev/demo without Build HAT).              |
-| `ALLOW_NO_AUTH_LOCAL` | No       | `0`     | `1` to skip API key for localhost clients only (dev convenience). |
-| `ARM_BACKLASH_<PORT>` | No       | `0`     | Degrees added on direction change for motor `<PORT>` to take up gear slack (e.g. `ARM_BACKLASH_D=2160` for six rotations). Backlash values and the last motor direction persist in `arm_calibration.json` and can be updated via `POST /v1/arm/backlash`. |
+| Variable                     | Required | Default      | What it does                                                                                 |
+| ---------------------------- | -------- | ------------ | -------------------------------------------------------------------------------------------- |
+| `API_KEY`                    | **Yes**  | `change-me`  | Shared secret for all control endpoints (`x-api-key` header). Set a real value in production.|
+| `PORT`                       | No       | `8000`       | Local listen port.                                                                           |
+| `HOST`                       | No       | `0.0.0.0`    | Bind address (supports IPv4/IPv6).                                                           |
+| `USE_FAKE_MOTORS`            | No       | `0`          | `1` to simulate motors (dev/demo without Build HAT).                                         |
+| `ALLOW_NO_AUTH_LOCAL`        | No       | `0`          | `1` to skip API key for localhost clients only (dev convenience).                            |
+| `ENABLE_GAMEPAD`             | No       | `0`          | `1` to enable Bluetooth gamepad control (requires `evdev`).                                  |
+| `GAMEPAD_DEVICE`             | No       | (auto)       | Override the input device path when multiple controllers are present.                        |
+| `MOTOR_WATCHDOG_INTERVAL_S`  | No       | `2`          | Health polling interval for real motors (seconds).                                           |
+| `MOTOR_WATCHDOG_GRACE_S`     | No       | `6`          | Time before watchdog restarts the process when motor health is failing (seconds).            |
 
 Logs are written to `lego_arm_master.log` beside the script.
 
-### Backlash calibration UI
-
-Open the control page's **Admin** drawer and double‑click the faint `fw` label at the bottom to reveal a hidden menu. Adjust per‑motor backlash offsets there and press **Save** to update `arm_calibration.json` through `POST /v1/arm/backlash`.
-
 ### Rotation calibration UI
 
-The Admin drawer also contains **Rotation calibration** to tune how many motor degrees produce one full joint rotation. Adjust the per-motor values and press **Save** to persist them via `POST /v1/arm/rotation`.
+Open the control page's **Admin** drawer to tune how many motor degrees produce one full joint rotation. Adjust the per-motor values and press **Save** to persist them via `POST /v1/arm/rotation`.
+
+### Named-point calibration UI
+
+Open the control page's **Calibration** drawer to capture named points for each motor (open/closed, min/pick/max, assembly/neutral/quality). Once all required points are recorded, press **Finalize** to derive limits and move to the computed home pose.
 
 ---
 
@@ -241,8 +248,8 @@ Lists available endpoints, poses, motors.
 
 ### `GET /v1/arm/state`  *(auth)*
 
-Returns current absolute degrees, software limits, motors, backlash and rotation
-calibration, and any named points captured during calibration.
+Returns current absolute degrees, software limits, motor list, rotation
+calibration, calibration status, and any named points captured during calibration.
 
 ```json
 {
@@ -251,27 +258,11 @@ calibration, and any named points captured during calibration.
     "abs_degrees": {"A": 0, "B": 0, "C": 0, "D": 0},
     "limits": {"A": [-360,360], "B": [-180,180], "C": [-180,180], "D": [-90,90]},
     "motors": ["A","B","C","D"],
-    "backlash": {"A":0,"B":0,"C":0,"D":0},
     "rotation": {"A":360,"B":360,"C":360,"D":360},
+    "calibrated": true,
     "points": {"A": {"closed": 0, "open": 90}}
   }
 }
-```
-
-### `GET /v1/arm/backlash`  *(auth)*
-
-Returns the persisted backlash calibration in degrees for each motor.
-
-```json
-{ "A": 0, "B": 0, "C": 0, "D": 2160 }
-```
-
-### `POST /v1/arm/backlash`  *(auth)*
-
-Update backlash calibration; values are saved to `arm_calibration.json` and applied to subsequent moves.
-
-```json
-{ "A": 10, "D": 2160 }
 ```
 
 ### `GET /v1/arm/rotation`  *(auth)*
@@ -279,15 +270,15 @@ Update backlash calibration; values are saved to `arm_calibration.json` and appl
 Returns the degrees required for one full joint rotation for each motor.
 
 ```json
-{ "A": 360, "B": 360, "C": 360, "D": 360 }
+{ "rotation": { "A": 360, "B": 360, "C": 360, "D": 360 } }
 ```
 
 ### `POST /v1/arm/rotation`  *(auth)*
 
-Update per-motor rotation calibration; values are saved to `arm_calibration.json` and applied when specifying rotations.
+Update per-motor rotation calibration; values are saved to `arm_calibration.json` and applied when specifying rotations. The payload can either be the raw map or wrapped under a `rotation` key.
 
 ```json
-{ "A": 400 }
+{ "rotation": { "A": 400 } }
 ```
 
 ### `GET /v1/arm/calibration`  *(auth)*
@@ -295,35 +286,36 @@ Update per-motor rotation calibration; values are saved to `arm_calibration.json
 Returns calibration progress and whether the controller is ready.
 
 ```json
-{ "points": {"p1": {"A":0}}, "calibrated": false }
+{ "points": {"A": {"open": 0}}, "calibrated": false }
 ```
 
 ### `POST /v1/arm/calibration`  *(auth)*
 
-Record calibration points or finalize. To store the current joint angles for a point, send `{ "point": "p1" }` where `p1`..`p4` correspond to the four required positions. After all points are collected, finalize with `{ "finalize": true }` to derive joint limits, persist named reference points (e.g. `closed`, `assembly`) and automatically move to the computed home pose.
+Record named points, reset calibration, or finalize. To store the current joint angle for a named point, send `{ "joint": "A", "name": "open" }`. To clear all points, send `{ "reset": true }`. After all required points are collected, finalize with `{ "finalize": true }` to derive joint limits and automatically move to the computed home pose.
 
 ```bash
 curl -X POST https://<ngrok>/v1/arm/calibration \\
   -H "content-type: application/json" -H "x-api-key: $KEY" \\
-  -d '{"point":"p1"}'
+  -d '{"joint":"A","name":"open"}'
 ```
 
 ### Calibrated point names
 
-`finalize_calibration` derives the following reference points:
+Finalization requires the following named points per joint:
 
 | Motor | Names |
 |-------|-------|
 | A (gripper) | `open`, `closed` |
 | B (wrist)   | `min`, `pick`, `max` |
-| C (elbow)   | `min`, `max` |
-| D (base rotation) | `neutral`, `assembly`, `quality` |
+| C (elbow)   | `min`, `pick`, `max` |
+| D (base rotation) | `assembly`, `neutral`, `quality` |
 
-These names can be supplied wherever a joint angle is expected, e.g. `{ "A": "open" }`.
+You can also store additional names (e.g. `raised`) and reference them anywhere a joint angle is expected, e.g. `{ "A": "open" }`.
 
 ### `POST /v1/arm/pose`  *(auth)*
 
 Go to a named pose. Built-in names: `home`, `pick_left`, `pick_right`, `place_left`, `place_right`.
+By default the call is queued (`async_exec: true`) and returns an operation id; set `async_exec: false` for a synchronous response.
 
 ```bash
 curl -X POST https://<ngrok>/v1/arm/pose \
@@ -344,15 +336,16 @@ Relative or absolute joint moves. Always specify the intended `"units"` so the b
   "timeout_s": 30,                   // optional generous guard
   "finalize": true,                  // corrective nudge based on encoder error
   "finalize_deadband_deg": 2.0,      // skip finalize if within tolerance
-  "async_exec": false                // true -> returns operation_id
+  "async_exec": true                 // default true -> returns operation_id
 }
 ```
 
-When `async_exec` is `false` the response echoes the final encoder delta, applied unit conversions, and whether a timeout occurred. Callers that need to inspect the most recent move can also poll [`GET /v1/arm/last_move`](#get-v1armlast_move--auth).
+When `async_exec` is `true` (default) the response returns an `operation_id`; poll [`GET /v1/operations/{id}`](#get-v1operationsid--auth) for results. When `async_exec` is `false` the response echoes the final encoder delta, applied unit conversions, and whether a timeout occurred. Callers that need to inspect the most recent move can also poll [`GET /v1/arm/last_move`](#get-v1armlast_move--auth).
 
 ### `POST /v1/arm/pickplace`  *(auth)*
 
 Simple helper sequence.
+By default the call is queued (`async_exec: true`) and returns an operation id; set `async_exec: false` for a synchronous response.
 
 ```json
 { "location": "left|center|right", "action": "pick|place", "speed": 50, "async_exec": false }
@@ -376,6 +369,14 @@ Enable or disable coast mode on one or more motors for manual manipulation.
 
 Omit `motors` to affect all. Set `"enable": false` to restore braking.
 
+### `POST /v1/arm/recover`  *(auth)*
+
+Attempts to stop motion, read current encoder positions, and move back to a safe home pose (uses calibrated points when available).
+
+```json
+{ "speed": 30, "timeout_s": 90 }
+```
+
 ### `GET /v1/arm/last_move`  *(auth)*
 
 Returns telemetry for the most recent completed move command.
@@ -385,9 +386,12 @@ Returns telemetry for the most recent completed move command.
   "units": "rotations",
   "commanded": {"A": 3},
   "converted_degrees": {"A": 1080},
+  "new_abs": {"A": 1080},
   "speed": 60,
+  "timeout_s": 30,
   "elapsed_s": 2.4,
   "final_error_deg": {"A": 1.1},
+  "finalize_deadband_deg": 2,
   "finalize_corrections": {"A": 1.1},
   "finalized": true,
   "timeout": false
@@ -446,44 +450,15 @@ Because headers are set in the Service Registry, you only supply **method/path/b
 ## On-device web UI
 
 With the service running on the Raspberry Pi you can visit `http://<pi>:8000/` or your ngrok URL to access a small control panel.
-It shows current joint positions and provides buttons for common poses, custom moves, and an emergency stop. Enter the API key
-and base URL at the top if authentication is enabled.
-
-## Tester page (manual browser testing)
-
-Drop this into `examples/tester.html`, open it, set **Base URL** to your ngrok, and paste your **API key**. Click buttons.
-
-```html
-<!doctype html><meta charset="utf-8"><title>LEGO Arm API Tester</title>
-<style>body{font-family:sans-serif;max-width:700px;margin:32px auto}
-input,button,textarea{margin:6px 0;width:100%}</style>
-<h1>LEGO Arm API Tester</h1>
-<label>Base URL: <input id="base" value="https://YOUR-NGROK.ngrok-free.app"></label>
-<label>API Key: <input id="key" placeholder="paste API key"></label>
-<button onclick="call('GET','/v1/health')">GET /v1/health</button>
-<button onclick="call('GET','/v1/inventory',null,true)">GET /v1/inventory</button>
-<textarea id="move" rows="6">{ "mode":"relative","joints":{"A":10,"B":-5},"speed":40 }</textarea>
-<button onclick="post('/v1/arm/move', move.value)">POST /v1/arm/move</button>
-<pre id="out" style="background:#111;color:#0f0;padding:12px;white-space:pre-wrap"></pre>
-<script>
-async function call(m,p,b=null,auth=false){
-  const u=document.getElementById('base').value.trim()+p;
-  const k=document.getElementById('key').value.trim();
-  const h={"content-type":"application/json","ngrok-skip-browser-warning":"1"};
-  if(auth && k) h["x-api-key"]=k;
-  const r=await fetch(u,{method:m,headers:h,body:b}); 
-  document.getElementById('out').textContent = r.status+" "+r.statusText+"\n\n"+await r.text();
-}
-function post(p,b){return call('POST',p,b,true)}
-</script>
-```
+It shows current joint positions and provides buttons for common poses, custom moves, and an emergency stop. Use the **Calibration**
+drawer to capture named points, and the **Admin** drawer to set base URL/API key, enable tilt-to-nudge, and update rotation calibration.
 
 ---
 
 ## Safety, calibration & assumptions
 
 * On startup the controller assumes the **current physical pose is absolute zero (0°)** for A/B/C/D. If that’s not true, first move to a safe “home” physically, then start the service.
-* Software **limits** (deg): A: ±360, B/C: ±180, D (gripper): ±90. Adjust for your build.
+* Software **limits** are unset until calibration is finalized. Finalization derives min/max limits from the named points you captured.
 * Motions are executed **sequentially per joint**, blocking, at a simple “speed” scale (1–100).
 * Add a **hardware E-stop** and current/limit protections. The `stop` endpoint is not a safety system.
 
@@ -491,7 +466,7 @@ function post(p,b){return call('POST',p,b,true)}
 
 ## Troubleshooting
 
-Server logs are written to `/var/log/legoarm/app.log`. Consult this file for detailed information when diagnosing issues.
+Server logs are written to `lego_arm_master.log` next to the script. Consult this file for detailed information when diagnosing issues.
 
 **Health works locally but not via ngrok**
 
@@ -501,6 +476,10 @@ Server logs are written to `/var/log/legoarm/app.log`. Consult this file for det
 **401 Unauthorized**
 
 * Missing/wrong `x-api-key`. Set default header in Service Registry.
+
+**400 NOT_CALIBRATED**
+
+* Run the calibration flow (`POST /v1/arm/calibration` with named points, then finalize) before using poses, pick/place, or processes.
 
 **502 from ngrok**
 
@@ -570,4 +549,3 @@ curl -X POST https://<ngrok>/v1/processes/pick-assembly-quality \
 ```
 
 ---
-

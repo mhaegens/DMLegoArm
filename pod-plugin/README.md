@@ -5,7 +5,7 @@ This folder contains a SAP Digital Manufacturing (DM) POD plugin that lets an op
 ## What it does
 
 * **Quick actions** – Buttons for Health, Inventory, Pick, Place, Pose and Stop.
-* **Manual moves** – Form for sending joint commands (motors A‑D) with speed/acceleration, dry‑run option and JSON preview.
+* **Manual moves** – Form for sending relative joint commands (motors A‑D) in degrees with speed control and a JSON preview (accel/dry-run inputs are UI-only placeholders today).
 * **Console output** – Timestamped log of every request/response.
 * **Config bridge** – Settings can be provided by the POD Designer, runtime `postMessage` events or edited via a built‑in dialog. Values are persisted in `localStorage`.
 

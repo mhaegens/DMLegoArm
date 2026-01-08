@@ -7,15 +7,18 @@ This folder contains a refreshed SAP Digital Manufacturing (DM) POD plugin that 
 ## What it does
 
 * **Health + telemetry** – Live health checks plus a state snapshot showing joint angles and limits.
-* **Preset joints** – One-tap buttons for common points (A open/close, B&C min/pick/max, D assembly/quality/neutral) with a configurable speed.
+* **Preset joints** – One-tap buttons for common named points (A open/close, B&C min/pick/max, D assembly/quality/neutral) with a configurable speed.
 * **Pose shortcuts** – Combined poses such as Pick Assembly, Pick Quality, Neutral and Flex.
 * **Nudges** – Adjustable +/- step controls per joint using rotation units and a configurable speed.
+* **Production processes** – Lists `/v1/processes/*` endpoints with a Run button plus a dedicated Shutdown action.
 * **Console output** – Timestamped log of every request/response.
 * **Config bridge** – Settings can be provided by the POD Designer, runtime `postMessage` events or edited via a built‑in dialog. Values are persisted in `localStorage`.
 
 ## Backend overview
 
 The plugin talks to `lego_arm_master.py`, a single‑file HTTP server that exposes a stable, versioned `/v1/*` REST API secured with an `x-api-key` header and optional idempotency key. The server can drive real motors or simulate them with `USE_FAKE_MOTORS=1`.
+
+Preset joints and pose shortcuts read named calibration points from `GET /v1/arm/state`. Run the on-device calibration flow first so the points (`open`, `min`, `pick`, `max`, etc.) are available.
 
 ## Configuration
 
