@@ -54,8 +54,8 @@
     };
     const POS_ORDER = {
       A:["open","closed"],
-      B:["min","pick","max"],
-      C:["min","pick","max"],
+      B:["min","pick","raised","max"],
+      C:["min","pick","raised","max"],
       D:["assembly","neutral","quality"],
     };
     const cx = (...classes) => classes.filter(Boolean).join(' ');
@@ -1397,8 +1397,8 @@
           {calibOpen && (()=>{
             const CALIB={
               A:[{label:'open',key:'open'},{label:'close',key:'closed'}],
-              B:[{label:'min',key:'min'},{label:'pick',key:'pick'},{label:'max',key:'max'}],
-              C:[{label:'min',key:'min'},{label:'pick',key:'pick'},{label:'max',key:'max'}],
+              B:[{label:'min',key:'min'},{label:'pick',key:'pick'},{label:'raised',key:'raised'},{label:'max',key:'max'}],
+              C:[{label:'min',key:'min'},{label:'pick',key:'pick'},{label:'raised',key:'raised'},{label:'max',key:'max'}],
               D:[{label:'assembly',key:'assembly'},{label:'neutral',key:'neutral'},{label:'quality',key:'quality'}],
             };
             const allSet=Object.entries(CALIB).every(([j,arr])=>arr.every(p=>calibStatus.points?.[j]?.[p.key]!==undefined));
