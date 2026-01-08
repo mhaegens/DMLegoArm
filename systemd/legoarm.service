@@ -12,7 +12,7 @@ Group=lego
 WorkingDirectory=/path/to/lego-arm
 # CHANGE: set the full path to the server script on the device.
 ExecStart=/usr/bin/python3 /path/to/lego_arm_master.py
-# CHANGE: set the path to your environment file (keys, ports, etc).
+# Load config from an external file, e.g. /etc/legoarm.env
 EnvironmentFile=-/etc/legoarm.env
 # For localhost-only dev you may allow no auth:
 # Environment=ALLOW_NO_AUTH_LOCAL=1
